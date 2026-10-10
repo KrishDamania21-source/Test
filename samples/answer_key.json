@@ -1,11 +1,21 @@
 {
   "_conventions": {
     "purpose": "Ground truth for evaluation. Never edit this file to match model output.",
-    "substance_ids": "Substance keys from rohs_rules.py: lead, mercury, cadmium, chromium_vi, pbb, pbde, dehp, bbp, dbp, dibp.",
+    "substance_ids": "Substance names exactly as in the active EU RoHS rule pack (rules/packs/eu_rohs/).",
     "near_limit": "NEAR_LIMIT when concentration >= 80% of the limit and <= the limit.",
     "unverifiable_vs_missing": "UNVERIFIABLE when a value is given as text that cannot be compared to a limit (trace amounts, N/A, <LOD). MISSING_CONCENTRATION when no value is given at all.",
-    "exemption": "A substance with an exemption claim gets EXEMPTION_CLAIMED instead of OVER_LIMIT, so the declaration routes to human review (Medium) rather than High.",
-    "risk_rating": "Any OVER_LIMIT = High. Else any MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE or EXEMPTION_CLAIMED = Medium. Else NEAR_LIMIT only = Low with watch flag. Else Low."
+    "exemption": "A substance with an exemption claim gets EXEMPTION_CLAIMED instead of OVER_LIMIT, so the declaration routes to human review (Medium) rather than High. The finding still shows the value against the base limit. Whether an exemption is valid is a human judgment.",
+    "risk_rating": "Any OVER_LIMIT = High. Else any MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE or EXEMPTION_CLAIMED = Medium. Else NEAR_LIMIT only = Low with watch flag. Else Low. NOT_DECLARED is ignored for rating.",
+    "not_declared": "NOT_DECLARED (severity Info) for each restricted substance in the active pack that the declaration does not address at all. A substance listed with a vague or missing value counts as addressed. NOT_DECLARED never changes the risk rating; it feeds the 'please confirm' list in the follow-up email.",
+    "severity": {
+      "OVER_LIMIT": "High",
+      "MISSING_CAS": "Medium",
+      "MISSING_CONCENTRATION": "Medium",
+      "UNVERIFIABLE": "Medium",
+      "EXEMPTION_CLAIMED": "Medium",
+      "NEAR_LIMIT": "Low",
+      "NOT_DECLARED": "Info"
+    }
   },
   "samples": {
     "01_brightvale_compliant.md": {
@@ -15,7 +25,8 @@
       "substance_count": 10,
       "expected_findings": [],
       "expected_risk": "Low",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     },
     "02_kestrel_lead_over.pdf": {
       "supplier": "Kestrel Microparts",
@@ -23,10 +34,30 @@
       "characteristic": "Lead over the limit (0.35% vs 0.1%)",
       "substance_count": 6,
       "expected_findings": [
-        {"type": "OVER_LIMIT", "substance": "lead"}
+        {
+          "type": "OVER_LIMIT",
+          "substance": "Lead"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated biphenyls (PBB)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Dibutyl phthalate (DBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
       ],
       "expected_risk": "High",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     },
     "03_orrin_no_cas.txt": {
       "supplier": "Orrin Polymer Works",
@@ -34,13 +65,50 @@
       "characteristic": "Substances listed without CAS numbers",
       "substance_count": 4,
       "expected_findings": [
-        {"type": "MISSING_CAS", "substance": "lead"},
-        {"type": "MISSING_CAS", "substance": "cadmium"},
-        {"type": "MISSING_CAS", "substance": "mercury"},
-        {"type": "MISSING_CAS", "substance": "dehp"}
+        {
+          "type": "MISSING_CAS",
+          "substance": "Lead"
+        },
+        {
+          "type": "MISSING_CAS",
+          "substance": "Cadmium"
+        },
+        {
+          "type": "MISSING_CAS",
+          "substance": "Mercury"
+        },
+        {
+          "type": "MISSING_CAS",
+          "substance": "Bis(2-ethylhexyl) phthalate (DEHP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Hexavalent chromium"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated biphenyls (PBB)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated diphenyl ethers (PBDE)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Dibutyl phthalate (DBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
       ],
       "expected_risk": "Medium",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     },
     "04_tamsin_vague.txt": {
       "supplier": "Tamsin Cable Co.",
@@ -48,21 +116,69 @@
       "characteristic": "Vague language (trace amounts, N/A, <LOD)",
       "substance_count": 5,
       "expected_findings": [
-        {"type": "UNVERIFIABLE", "substance": "lead"},
-        {"type": "UNVERIFIABLE", "substance": "mercury"},
-        {"type": "UNVERIFIABLE", "substance": "cadmium"}
+        {
+          "type": "UNVERIFIABLE",
+          "substance": "Lead"
+        },
+        {
+          "type": "UNVERIFIABLE",
+          "substance": "Mercury"
+        },
+        {
+          "type": "UNVERIFIABLE",
+          "substance": "Cadmium"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated biphenyls (PBB)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated diphenyl ethers (PBDE)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Dibutyl phthalate (DBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
       ],
       "expected_risk": "Medium",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     },
     "05_veldra_ppm.csv": {
       "supplier": "Veldra Electronics",
       "component": "VE-5 PCB assembly",
       "characteristic": "Concentrations in ppm instead of % (all compliant once converted: lead 450 ppm = 0.045%)",
       "substance_count": 6,
-      "expected_findings": [],
+      "expected_findings": [
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated biphenyls (PBB)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated diphenyl ethers (PBDE)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
+      ],
       "expected_risk": "Low",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     },
     "06_corvan_cadmium_near.pdf": {
       "supplier": "Corvan Plastics",
@@ -70,10 +186,30 @@
       "characteristic": "Cadmium just under its stricter limit (0.009% vs 0.01%)",
       "substance_count": 6,
       "expected_findings": [
-        {"type": "NEAR_LIMIT", "substance": "cadmium"}
+        {
+          "type": "NEAR_LIMIT",
+          "substance": "Cadmium"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Bis(2-ethylhexyl) phthalate (DEHP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Dibutyl phthalate (DBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
       ],
       "expected_risk": "Low",
-      "watch_flag": true
+      "watch_flag": true,
+      "pack_id": "eu_rohs"
     },
     "07_ashgrove_exemption.md": {
       "supplier": "Ashgrove Metals",
@@ -81,10 +217,38 @@
       "characteristic": "Exemption claimed for lead in copper alloy (Annex III 6(c))",
       "substance_count": 4,
       "expected_findings": [
-        {"type": "EXEMPTION_CLAIMED", "substance": "lead"}
+        {
+          "type": "EXEMPTION_CLAIMED",
+          "substance": "Lead"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated biphenyls (PBB)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Polybrominated diphenyl ethers (PBDE)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Bis(2-ethylhexyl) phthalate (DEHP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Butyl benzyl phthalate (BBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Dibutyl phthalate (DBP)"
+        },
+        {
+          "type": "NOT_DECLARED",
+          "substance": "Diisobutyl phthalate (DIBP)"
+        }
       ],
       "expected_risk": "Medium",
-      "watch_flag": false
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     }
   }
 }
