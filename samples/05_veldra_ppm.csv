@@ -1,0 +1,11 @@
+# Synthetic sample for the RADAR prototype. Fictional supplier.
+# Veldra Electronics (fictional)  --  RoHS decl.  part VE-5 PCB assembly
+,,,
+CAS ,  Material/Substance,conc (ppm) , notes
+7439-92-1, lead ,450,solder joints
+7440-43-9,Cadmium, 20 ,
+  7439-97-6 ,mercury,5,
+18540-29-9,"Chromium VI",  30,plating
+,,,
+117-81-7,DEHP ,  120 ,
+84-74-2,DBP,60,

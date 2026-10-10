@@ -1,0 +1,90 @@
+{
+  "_conventions": {
+    "purpose": "Ground truth for evaluation. Never edit this file to match model output.",
+    "substance_ids": "Substance keys from rohs_rules.py: lead, mercury, cadmium, chromium_vi, pbb, pbde, dehp, bbp, dbp, dibp.",
+    "near_limit": "NEAR_LIMIT when concentration >= 80% of the limit and <= the limit.",
+    "unverifiable_vs_missing": "UNVERIFIABLE when a value is given as text that cannot be compared to a limit (trace amounts, N/A, <LOD). MISSING_CONCENTRATION when no value is given at all.",
+    "exemption": "A substance with an exemption claim gets EXEMPTION_CLAIMED instead of OVER_LIMIT, so the declaration routes to human review (Medium) rather than High.",
+    "risk_rating": "Any OVER_LIMIT = High. Else any MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE or EXEMPTION_CLAIMED = Medium. Else NEAR_LIMIT only = Low with watch flag. Else Low."
+  },
+  "samples": {
+    "01_brightvale_compliant.md": {
+      "supplier": "Brightvale Components",
+      "component": "BV-220 ceramic capacitor, 10 uF",
+      "characteristic": "Fully compliant",
+      "substance_count": 10,
+      "expected_findings": [],
+      "expected_risk": "Low",
+      "watch_flag": false
+    },
+    "02_kestrel_lead_over.pdf": {
+      "supplier": "Kestrel Microparts",
+      "component": "KM-48 tin-plated terminal block",
+      "characteristic": "Lead over the limit (0.35% vs 0.1%)",
+      "substance_count": 6,
+      "expected_findings": [
+        {"type": "OVER_LIMIT", "substance": "lead"}
+      ],
+      "expected_risk": "High",
+      "watch_flag": false
+    },
+    "03_orrin_no_cas.txt": {
+      "supplier": "Orrin Polymer Works",
+      "component": "OPW-7 nylon cable gland",
+      "characteristic": "Substances listed without CAS numbers",
+      "substance_count": 4,
+      "expected_findings": [
+        {"type": "MISSING_CAS", "substance": "lead"},
+        {"type": "MISSING_CAS", "substance": "cadmium"},
+        {"type": "MISSING_CAS", "substance": "mercury"},
+        {"type": "MISSING_CAS", "substance": "dehp"}
+      ],
+      "expected_risk": "Medium",
+      "watch_flag": false
+    },
+    "04_tamsin_vague.txt": {
+      "supplier": "Tamsin Cable Co.",
+      "component": "TC-90 PVC jacketed cable",
+      "characteristic": "Vague language (trace amounts, N/A, <LOD)",
+      "substance_count": 5,
+      "expected_findings": [
+        {"type": "UNVERIFIABLE", "substance": "lead"},
+        {"type": "UNVERIFIABLE", "substance": "mercury"},
+        {"type": "UNVERIFIABLE", "substance": "cadmium"}
+      ],
+      "expected_risk": "Medium",
+      "watch_flag": false
+    },
+    "05_veldra_ppm.csv": {
+      "supplier": "Veldra Electronics",
+      "component": "VE-5 PCB assembly",
+      "characteristic": "Concentrations in ppm instead of % (all compliant once converted: lead 450 ppm = 0.045%)",
+      "substance_count": 6,
+      "expected_findings": [],
+      "expected_risk": "Low",
+      "watch_flag": false
+    },
+    "06_corvan_cadmium_near.pdf": {
+      "supplier": "Corvan Plastics",
+      "component": "CP-3 yellow ABS housing",
+      "characteristic": "Cadmium just under its stricter limit (0.009% vs 0.01%)",
+      "substance_count": 6,
+      "expected_findings": [
+        {"type": "NEAR_LIMIT", "substance": "cadmium"}
+      ],
+      "expected_risk": "Low",
+      "watch_flag": true
+    },
+    "07_ashgrove_exemption.md": {
+      "supplier": "Ashgrove Metals",
+      "component": "AM-12 brass connector pin",
+      "characteristic": "Exemption claimed for lead in copper alloy (Annex III 6(c))",
+      "substance_count": 4,
+      "expected_findings": [
+        {"type": "EXEMPTION_CLAIMED", "substance": "lead"}
+      ],
+      "expected_risk": "Medium",
+      "watch_flag": false
+    }
+  }
+}

@@ -1,0 +1,5 @@
+Synthetic sample for the RADAR prototype. Fictional supplier.
+
+Material declaration from Orrin Polymer Works (fictional), 14 April 2026.
+
+Regarding part OPW-7 nylon cable gland, our lab results per homogeneous material are as follows. Lead was measured at 0.012% by weight and cadmium at 0.002%. Mercury came in at 0.001%, and the plasticiser DEHP was found at 0.02%. No other restricted substances were tested. Please contact our quality team with any questions.

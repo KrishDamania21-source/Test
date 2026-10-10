@@ -1,0 +1,17 @@
+Synthetic sample for the RADAR prototype. Fictional supplier.
+
+From: Quality Desk, Tamsin Cable Co. (fictional)
+Subject: RoHS info for TC-90 PVC jacketed cable
+
+Hi,
+
+Please see our substance info for the TC-90 PVC jacketed cable below.
+
+- Lead (CAS 7439-92-1): trace amounts
+- Mercury (CAS 7439-97-6): N/A
+- Cadmium (CAS 7440-43-9): <LOD
+- Hexavalent chromium (CAS 18540-29-9): 0.003 %
+- DEHP (CAS 117-81-7): 0.01 %
+
+Regards,
+Quality Desk
