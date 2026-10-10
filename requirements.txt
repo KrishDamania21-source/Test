@@ -1,0 +1,7 @@
+anthropic
+streamlit
+python-dotenv
+jsonschema
+pypdf
+reportlab
+pytest
