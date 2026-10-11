@@ -11,7 +11,6 @@ from radar.extract import (
     MODEL,
     ExtractionError,
     extract,
-    grounding_warnings,
     validate_extraction,
 )
 from tests.fakes import FakeClient, response
@@ -72,12 +71,6 @@ def test_invalid_payloads_rejected(bad, message):
     assert any(message in e for e in errors), errors
 
 
-def test_grounding_warning_for_invented_source_text():
-    data = payload(substance(source_text="Lead: 450 ppm per our lab"))
-    assert grounding_warnings(data, DOC_TEXT) == ["Source text for 'Lead' was not found verbatim in the document."]
-    assert grounding_warnings(payload(), DOC_TEXT) == []
-
-
 # ---- extraction flow
 
 def test_extract_success_first_try_and_cached(doc, cache_dir):
@@ -90,11 +83,13 @@ def test_extract_success_first_try_and_cached(doc, cache_dir):
     call = client.calls[0]
     assert call["model"] == MODEL == "claude-sonnet-5-5"
     assert call["output_config"]["format"]["type"] == "json_schema"
+    assert "fallbacks" not in call and "betas" not in call
     assert DOC_TEXT in call["messages"][0]["content"]
 
     # Second run: served from disk, the client is never touched.
     again = extract(doc, client=FakeClient(), cache_dir=cache_dir)
     assert again.from_cache and again.data == result.data
+    assert again.document_text == DOC_TEXT
 
 
 def test_retry_once_with_validation_errors(doc, cache_dir):
@@ -116,10 +111,15 @@ def test_second_failure_raises_and_is_not_cached(doc, cache_dir):
     assert cache.get(cache.file_hash(doc.data), EXTRACTION_VERSION, MODEL, cache_dir=cache_dir) is None
 
 
-@pytest.mark.parametrize("stop, message", [("refusal", "declined"), ("max_tokens", "ran out")])
+@pytest.mark.parametrize("stop, message", [("refusal", "declined .*refusal"), ("max_tokens", "ran out")])
 def test_refusal_and_truncation_raise(doc, cache_dir, stop, message):
     with pytest.raises(ExtractionError, match=message):
         extract(doc, client=FakeClient(response(payload(), stop_reason=stop)), cache_dir=cache_dir)
+
+
+def test_response_from_another_model_is_rejected(doc, cache_dir):
+    with pytest.raises(ExtractionError, match="expected claude-sonnet-5-5"):
+        extract(doc, client=FakeClient(response(payload(), model="claude-sonnet-5")), cache_dir=cache_dir)
 
 
 def test_changed_file_misses_cache(doc, cache_dir):

@@ -10,6 +10,8 @@ Flow per document:
   2. Call Claude with a JSON schema for the output.
   3. Validate: JSON parses, matches the schema, and passes consistency
      checks (a reported number must actually appear in the raw value).
+     Whether each source_text really appears in the document is judged
+     later by the rules engine (UNTRACEABLE_EXTRACTION), not here.
   4. If validation fails, retry once, sending the errors back.
   5. Cache the validated result on disk.
 
@@ -106,7 +108,7 @@ class ExtractionResult:
     data: dict
     attempts: int
     from_cache: bool
-    warnings: list[str] = field(default_factory=list)
+    document_text: str = ""
     usage: dict = field(default_factory=dict)
 
     def to_record(self) -> dict:
@@ -117,17 +119,14 @@ class ExtractionResult:
             "extraction_version": self.extraction_version,
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "attempts": self.attempts,
-            "warnings": self.warnings,
             "usage": self.usage,
             "data": self.data,
+            # Kept so findings can be re-screened later (new rule packs) with no API call.
+            "document_text": self.document_text,
         }
 
 
 # ---------------------------------------------------------------- validation
-
-def _squash(text: str) -> str:
-    return " ".join(text.lower().split())
-
 
 def validate_extraction(text: str) -> tuple[dict | None, list[str]]:
     """Return (data, errors). Errors are hard failures that trigger the retry."""
@@ -163,16 +162,6 @@ def validate_extraction(text: str) -> tuple[dict | None, list[str]]:
     return (data if not errors else None), errors
 
 
-def grounding_warnings(data: dict, document_text: str) -> list[str]:
-    """Soft checks: flag source_text that cannot be found in the document."""
-    doc = _squash(document_text)
-    warnings = []
-    for s in data["substances"]:
-        if _squash(s["source_text"]) not in doc:
-            warnings.append(f"Source text for '{s['name']}' was not found verbatim in the document.")
-    return warnings
-
-
 # ---------------------------------------------------------------- API call
 
 def make_client():
@@ -196,7 +185,7 @@ def _block_to_param(block):
 
 
 def _call(client, messages: list) -> object:
-    response = client.beta.messages.create(
+    response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
@@ -205,12 +194,12 @@ def _call(client, messages: list) -> object:
             "effort": EFFORT,
             "format": {"type": "json_schema", "schema": EXTRACTION_SCHEMA},
         },
-        # Server-side fallback if a safety classifier declines (Claude API only).
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
     )
+    # No fallback model: every result comes from MODEL. A refusal is an extraction error.
     if response.stop_reason == "refusal":
-        raise ExtractionError("The model declined to process this document.")
+        raise ExtractionError(f"{MODEL} declined to process this document (refusal).")
+    if not str(getattr(response, "model", MODEL)).startswith(MODEL):
+        raise ExtractionError(f"Response came from {response.model}, expected {MODEL}.")
     if response.stop_reason == "max_tokens":
         raise ExtractionError("The model ran out of output tokens before finishing.")
     return response
@@ -236,7 +225,7 @@ def extract(doc: Document, client=None, use_cache: bool = True, cache_dir=None) 
             return ExtractionResult(
                 filename=doc.filename, file_sha256=sha, model=MODEL,
                 extraction_version=EXTRACTION_VERSION, data=hit["data"], attempts=hit.get("attempts", 1),
-                from_cache=True, warnings=hit.get("warnings", []), usage=hit.get("usage", {}),
+                from_cache=True, document_text=hit.get("document_text", doc.text), usage=hit.get("usage", {}),
             )
 
     client = client or make_client()
@@ -264,7 +253,7 @@ def extract(doc: Document, client=None, use_cache: bool = True, cache_dir=None) 
     result = ExtractionResult(
         filename=doc.filename, file_sha256=sha, model=MODEL, extraction_version=EXTRACTION_VERSION,
         data=data, attempts=attempts, from_cache=False,
-        warnings=grounding_warnings(data, doc.text), usage=usage,
+        document_text=doc.text, usage=usage,
     )
     cache.put(sha, EXTRACTION_VERSION, MODEL, result.to_record(), **cache_kwargs)
     return result

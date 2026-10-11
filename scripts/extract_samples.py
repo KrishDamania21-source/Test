@@ -39,8 +39,6 @@ def main() -> int:
             pct = f"{c.percent:.4g} %" if c.percent is not None else c.status
             flag = "  EXEMPTION CLAIMED" if s["exemption_claimed"] else ""
             print(f"  - {s['name']:<28} CAS {s['cas'] or '-':<12} raw {s['concentration_raw']!r:<18} -> {pct}{flag}")
-        for w in result.warnings:
-            print(f"  warning: {w}")
         if not result.from_cache:
             calls += result.attempts
             total_in += result.usage.get("input_tokens", 0)
