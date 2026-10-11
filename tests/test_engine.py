@@ -301,16 +301,17 @@ def test_conflict_rates_by_the_worse_reading():
 
 
 def test_conflict_near_limit_under_one_reading_only():
+    # IDENTITY_CONFLICT forces Medium even though the only substantive finding is NEAR_LIMIT.
     r = run(item("Lead", "7440-43-9", "0.009", 0.009))
     assert readings(r) == Counter([(NEAR_LIMIT, "Cadmium", "cas")])
-    assert r.rating == LOW and r.watch
+    assert r.rating == MEDIUM and r.needs_review and r.watch
 
 
-def test_conflict_with_both_readings_clean_is_not_forced_to_medium():
-    """Pending Krish's answer: the conflict alone does not force Medium."""
+def test_conflict_with_both_readings_clean_forces_medium():
+    """Krish confirmed: IDENTITY_CONFLICT alone forces Medium / Needs review."""
     r = run(item("Lead", "7439-97-6", "0.001", 0.001))
     assert len(r.of_type(IDENTITY_CONFLICT)) == 1 and readings(r) == Counter()
-    assert r.rating == LOW and not r.needs_review
+    assert r.rating == MEDIUM and r.needs_review
 
 
 def test_conflict_both_substances_count_as_addressed():

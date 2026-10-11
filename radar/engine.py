@@ -51,13 +51,12 @@ SEVERITY = {
     NO_SUBSTANCES_ADDRESSED: MEDIUM,
     NEAR_LIMIT: LOW,
     NOT_DECLARED: INFO,
-    # Pending Krish: whether a conflict whose readings are both clean forces Medium.
-    # Until he decides it does not, so it is Info and the readings carry the rating.
-    IDENTITY_CONFLICT: INFO,
+    # Krish confirmed: even when both readings are clean, the conflict alone forces Medium / Needs review.
+    IDENTITY_CONFLICT: MEDIUM,
 }
 _SEVERITY_ORDER = {HIGH: 0, MEDIUM: 1, LOW: 2, INFO: 3}
 NEEDS_REVIEW_TYPES = {MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE, EXEMPTION_CLAIMED, UNTRACEABLE_EXTRACTION,
-                      NO_SUBSTANCES_ADDRESSED}
+                      NO_SUBSTANCES_ADDRESSED, IDENTITY_CONFLICT}
 
 NAME_READING, CAS_READING = "name", "cas"
 

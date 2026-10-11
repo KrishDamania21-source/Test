@@ -3,10 +3,11 @@
 This file lets a new session continue the RADAR project exactly where the
 last one stopped. Read it in full before changing anything.
 
-**Branch:** `claude/radar-compliance-agent-pvwlmz` (repo `KrishDamania21-source/Test`, public)
-**Status:** Steps 1 to 4 done, plus NO_SUBSTANCES_ADDRESSED and IDENTITY_CONFLICT (start of Step 5).
-The Step 5 agent outputs are next. 164 tests pass, with network blocked. First live extraction run
-still pending: see section 5, item 4.
+**Branch:** `claude/sleepy-carson-ktbujl` (repo `KrishDamania21-source/Test`, public)
+**Status:** Steps 1 to 4 done, plus NO_SUBSTANCES_ADDRESSED and IDENTITY_CONFLICT.
+IDENTITY_CONFLICT is now Medium / Needs review (confirmed by Krish). 164 tests pass, network blocked.
+Live extraction ran on all 8 samples (cached); eval_live.py scores 8/8 against answer_key.json.
+Step 5 (agent outputs) is next.
 **Working style:** after each step, stop, summarize, and wait for the owner (Krish) to say "next".
 
 ---
@@ -170,7 +171,7 @@ substance names exactly as they appear in the active rule pack.
 | EXEMPTION_CLAIMED | Medium | any exemption claim, checked before the value; shows value vs base limit |
 | NO_SUBSTANCES_ADDRESSED | Medium | the declaration addresses none of the restricted substances |
 | NEAR_LIMIT | Low + watch | at or above 80% of the limit |
-| IDENTITY_CONFLICT | Info (pending Krish) | name and CAS point to different restricted substances; entry judged under both readings |
+| IDENTITY_CONFLICT | Medium | name and CAS point to different restricted substances; entry judged under both readings; conflict alone forces Medium even if both readings are clean |
 | NOT_DECLARED | Info | restricted substance not mentioned at all; never changes the rating |
 
 Rating: any OVER_LIMIT = High; else any Medium finding = Medium / Needs review; else NEAR_LIMIT
@@ -260,11 +261,8 @@ since both readings' findings are kept. An empty extraction is now Medium (it wa
    * rate by the **worse** of the two readings;
    * both substances count as addressed for NOT_DECLARED.
 
-   Still to confirm with Krish: if both readings are clean, does the conflict alone force
-   Medium / Needs review, or does the entry stay Low as "rate by the worse reading" implies?
-   Until he answers, do not force Medium. (Built that way: IDENTITY_CONFLICT is Info and not in
-   `NEEDS_REVIEW_TYPES`; changing his answer is a one-line edit plus the test
-   `test_conflict_with_both_readings_clean_is_not_forced_to_medium`.)
+   Krish confirmed: the conflict alone forces Medium / Needs review even when both readings are
+   clean. IDENTITY_CONFLICT is now Medium and in `NEEDS_REVIEW_TYPES`.
 3. **`verified_by` pending** on `rules/packs/eu_rohs/20261010T000000Z.csv` and
    `rules/synonyms/20261010T000000Z.json` ("Drafted by Claude Code; pending human
    verification"). Do not change it; Krish signs off himself.
@@ -349,14 +347,16 @@ Two small, clearly labelled sample-subset packs (`is_subset = true`):
    `[ -n "$ANTHROPIC_API_KEY" ] && echo set || echo missing`.
 4. If set, run `python scripts/extract_samples.py` and show Krish what the model extracted for all
    8 samples (this is the first live run).
-5. Wait for "next" before starting Step 5.
+5. Run `python scripts/eval_live.py` (no API calls; uses cached extractions) to compare
+   rules-engine output against answer_key.json and report per-sample pass/fail.
+6. Wait for "next" before starting Step 5.
 
 ## 8. Repository map
 ```
 radar/         rules.py, documents.py, units.py, extract.py, cache.py, engine.py
 rules/         active.json, history.json, packs/eu_rohs/*.csv, synonyms/*.json
 samples/       8 declarations + answer_key.json
-scripts/       make_sample_pdfs.py, make_sample_xlsx.py, extract_samples.py
+scripts/       make_sample_pdfs.py, make_sample_xlsx.py, extract_samples.py, eval_live.py
 tests/         test_rules, test_documents, test_units, test_extract, test_engine,
                fakes.py, perfect_extractions.py
 conftest.py    blocks network in every test
