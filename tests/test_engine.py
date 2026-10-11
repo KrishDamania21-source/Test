@@ -10,11 +10,13 @@ from radar.documents import load_path
 from radar.engine import (
     EXEMPTION_CLAIMED,
     HIGH,
+    IDENTITY_CONFLICT,
     LOW,
     MEDIUM,
     MISSING_CAS,
     MISSING_CONCENTRATION,
     NEAR_LIMIT,
+    NO_SUBSTANCES_ADDRESSED,
     NOT_DECLARED,
     OVER_LIMIT,
     UNTRACEABLE_EXTRACTION,
@@ -185,7 +187,8 @@ def test_invented_over_limit_value_is_not_high():
 
 def test_invented_unrestricted_substance_still_flagged():
     r = run(item("Copper", "7440-50-8", "2", 2.0, source="Copper 2%"), document=DOCUMENT)
-    assert rated(r) == [(UNTRACEABLE_EXTRACTION, "Copper")] and r.findings[0].rule is None
+    assert Counter(rated(r)) == Counter([(UNTRACEABLE_EXTRACTION, "Copper"), (NO_SUBSTANCES_ADDRESSED, "(all)")])
+    assert r.of_type(UNTRACEABLE_EXTRACTION)[0].rule is None
 
 
 def test_untraceable_does_not_hide_real_over_limit_elsewhere():
@@ -224,8 +227,8 @@ def test_matching_uses_aliases_and_cas():
 
 
 def test_unrestricted_substance_ignored():
-    r = run(item("Copper", "7440-50-8", "60", 60.0))
-    assert rated(r) == [] and len(r.of_type(NOT_DECLARED)) == 10
+    r = run(item("Copper", "7440-50-8", "60", 60.0), item(raw="0.01", value=0.01))
+    assert rated(r) == [] and len(r.of_type(NOT_DECLARED)) == 9
 
 
 # ---- rating rules
@@ -237,9 +240,108 @@ def test_rating_precedence_and_ordering():
     assert [f.severity for f in r.findings][:3] == ["High", "Medium", "Low"]
 
 
-def test_empty_extraction_rates_low_with_all_not_declared():
+# ---- NO_SUBSTANCES_ADDRESSED
+
+def test_empty_extraction_is_no_substances_addressed():
     r = screen({"supplier": None, "component": None, "substances": []}, "text", RULES, SYNONYMS)
-    assert r.rating == LOW and len(r.findings) == 10
+    assert rated(r) == [(NO_SUBSTANCES_ADDRESSED, "(all)")]
+    assert r.rating == MEDIUM and r.needs_review and not r.watch
+    assert len(r.of_type(NOT_DECLARED)) == 10
+
+
+def test_only_unrestricted_substances_is_no_substances_addressed():
+    r = run(item("Copper", "7440-50-8", "60", 60.0), item("Zinc", "7440-66-6", "30", 30.0))
+    assert rated(r) == [(NO_SUBSTANCES_ADDRESSED, "(all)")] and r.rating == MEDIUM
+
+
+def test_one_clean_restricted_substance_is_enough_no_partial_threshold():
+    r = run(item(raw="0.001", value=0.001))
+    assert NO_SUBSTANCES_ADDRESSED not in {f.type for f in r.findings}
+    assert r.rating == LOW and len(r.of_type(NOT_DECLARED)) == 9
+
+
+def test_untraceable_restricted_entry_counts_as_addressed():
+    invented = item("Cadmium", "7440-43-9", "0.0001", 0.0001, source="made up")
+    r = run(invented, document="Supplier: Testco")
+    assert rated(r) == [(UNTRACEABLE_EXTRACTION, "Cadmium")] and r.rating == MEDIUM
+
+
+def test_vague_only_declaration_counts_as_addressed():
+    r = run(item(raw="N/A", value=None, unit=None))
+    assert NO_SUBSTANCES_ADDRESSED not in {f.type for f in r.findings}
+
+
+# ---- IDENTITY_CONFLICT
+
+def readings(result):
+    return Counter((f.type, f.substance, f.reading) for f in result.findings
+                   if f.type not in (NOT_DECLARED, IDENTITY_CONFLICT))
+
+
+def test_conflict_is_raised_and_both_readings_shown():
+    r = run(item("Lead", "7439-97-6", "0.35", 0.35))   # mercury's CAS
+    conflict = r.of_type(IDENTITY_CONFLICT)
+    assert len(conflict) == 1
+    assert "Lead" in conflict[0].message and "Mercury" in conflict[0].message and "7439-97-6" in conflict[0].message
+    assert readings(r) == Counter([(OVER_LIMIT, "Lead", "name"), (OVER_LIMIT, "Mercury", "cas")])
+    lead, mercury = sorted(r.of_type(OVER_LIMIT), key=lambda f: f.substance)
+    assert lead.rule_id.endswith("#lead") and mercury.rule_id.endswith("#mercury")
+    assert lead.message.startswith("Reading by name:") and mercury.message.startswith("Reading by CAS:")
+
+
+def test_conflict_rates_by_the_worse_reading():
+    # 0.05%: fine for lead (0.1%) but over the cadmium limit (0.01%).
+    r = run(item("Lead", "7440-43-9", "0.05", 0.05))
+    assert readings(r) == Counter([(OVER_LIMIT, "Cadmium", "cas")])
+    assert r.rating == HIGH
+    # Same the other way round: the name is the stricter reading.
+    r = run(item("Cadmium", "7439-92-1", "0.05", 0.05))
+    assert readings(r) == Counter([(OVER_LIMIT, "Cadmium", "name")])
+    assert r.rating == HIGH
+
+
+def test_conflict_near_limit_under_one_reading_only():
+    r = run(item("Lead", "7440-43-9", "0.009", 0.009))
+    assert readings(r) == Counter([(NEAR_LIMIT, "Cadmium", "cas")])
+    assert r.rating == LOW and r.watch
+
+
+def test_conflict_with_both_readings_clean_is_not_forced_to_medium():
+    """Pending Krish's answer: the conflict alone does not force Medium."""
+    r = run(item("Lead", "7439-97-6", "0.001", 0.001))
+    assert len(r.of_type(IDENTITY_CONFLICT)) == 1 and readings(r) == Counter()
+    assert r.rating == LOW and not r.needs_review
+
+
+def test_conflict_both_substances_count_as_addressed():
+    r = run(item("Lead", "7439-97-6", "0.001", 0.001))
+    not_declared = {f.substance for f in r.of_type(NOT_DECLARED)}
+    assert "Lead" not in not_declared and "Mercury" not in not_declared
+    assert len(not_declared) == 8
+
+
+def test_conflict_with_exemption_under_both_readings():
+    r = run(item("Lead", "7439-97-6", "3.2", 3.2, exemption="Annex III 6(c)"))
+    assert readings(r) == Counter([(EXEMPTION_CLAIMED, "Lead", "name"), (EXEMPTION_CLAIMED, "Mercury", "cas")])
+    assert r.rating == MEDIUM
+
+
+def test_conflict_untraceable_flags_both_readings():
+    r = run(item("Lead", "7439-97-6", "5", 5.0, source="made up"), document="Supplier: Testco")
+    assert readings(r) == Counter([(UNTRACEABLE_EXTRACTION, "Lead", "name"),
+                                   (UNTRACEABLE_EXTRACTION, "Mercury", "cas")])
+    assert r.rating == MEDIUM and len(r.of_type(IDENTITY_CONFLICT)) == 1
+
+
+def test_alias_and_group_cas_agreeing_is_not_a_conflict():
+    assert not run(item("Pb", "7439-92-1", "0.01", 0.01)).of_type(IDENTITY_CONFLICT)
+    assert not run(item("PBDE", "1163-19-5", "0.01", 0.01)).of_type(IDENTITY_CONFLICT)
+
+
+def test_unrestricted_name_with_restricted_cas_is_not_a_conflict():
+    """Only rule rows are known, so an unrecognised name cannot be said to conflict; CAS decides."""
+    r = run(item("Copper", "7439-92-1", "0.5", 0.5))
+    assert not r.of_type(IDENTITY_CONFLICT) and rated(r) == [(OVER_LIMIT, "Lead")]
 
 
 def test_result_records_rule_versions():

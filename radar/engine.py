@@ -11,15 +11,19 @@ Order of checks for each extracted substance:
      its values never produce a pass, a NEAR_LIMIT or an OVER_LIMIT.
   2. Matching to restricted substances (CAS first, then name and aliases).
      Substances that match no rule are not restricted and are skipped.
+     If the name and the CAS point to different restricted substances,
+     IDENTITY_CONFLICT is raised and the entry is judged under both
+     readings, each against its own rule; the rating takes the worse one.
   3. CAS present? Otherwise MISSING_CAS.
   4. Concentration: missing, vague, unit unusable, exemption claimed, or a
      number compared against the limit.
-Then every restricted substance not addressed at all gets NOT_DECLARED.
+Then every restricted substance not addressed at all gets NOT_DECLARED, and
+a declaration that addresses none of them gets NO_SUBSTANCES_ADDRESSED.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from radar.rules import Rule, SubstanceMatcher, SynonymSet
 from radar.units import MISSING, NUMERIC, UNKNOWN_UNIT, VAGUE, normalize
@@ -32,6 +36,8 @@ UNVERIFIABLE = "UNVERIFIABLE"
 EXEMPTION_CLAIMED = "EXEMPTION_CLAIMED"
 UNTRACEABLE_EXTRACTION = "UNTRACEABLE_EXTRACTION"
 NOT_DECLARED = "NOT_DECLARED"
+NO_SUBSTANCES_ADDRESSED = "NO_SUBSTANCES_ADDRESSED"
+IDENTITY_CONFLICT = "IDENTITY_CONFLICT"
 
 HIGH, MEDIUM, LOW, INFO = "High", "Medium", "Low", "Info"
 
@@ -42,11 +48,18 @@ SEVERITY = {
     MISSING_CONCENTRATION: MEDIUM,
     UNVERIFIABLE: MEDIUM,
     EXEMPTION_CLAIMED: MEDIUM,
+    NO_SUBSTANCES_ADDRESSED: MEDIUM,
     NEAR_LIMIT: LOW,
     NOT_DECLARED: INFO,
+    # Pending Krish: whether a conflict whose readings are both clean forces Medium.
+    # Until he decides it does not, so it is Info and the readings carry the rating.
+    IDENTITY_CONFLICT: INFO,
 }
 _SEVERITY_ORDER = {HIGH: 0, MEDIUM: 1, LOW: 2, INFO: 3}
-NEEDS_REVIEW_TYPES = {MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE, EXEMPTION_CLAIMED, UNTRACEABLE_EXTRACTION}
+NEEDS_REVIEW_TYPES = {MISSING_CAS, MISSING_CONCENTRATION, UNVERIFIABLE, EXEMPTION_CLAIMED, UNTRACEABLE_EXTRACTION,
+                      NO_SUBSTANCES_ADDRESSED}
+
+NAME_READING, CAS_READING = "name", "cas"
 
 NEAR_LIMIT_FRACTION = 0.8
 _EPS = 1e-9  # relative tolerance for float comparisons at the boundaries
@@ -64,6 +77,7 @@ class Finding:
     value_pct: float | None = None   # concentration in % after Python unit conversion
     raw_value: str | None = None     # exactly as written in the document
     source_text: str | None = None
+    reading: str | None = None       # "name" or "cas" when the entry has an identity conflict
 
     @property
     def rule_id(self) -> str | None:
@@ -206,33 +220,55 @@ def screen(extraction: dict, document_text: str, rules: list[Rule], synonyms: Sy
         name = item.get("name") or "(unnamed)"
         cas = (item.get("cas") or "").strip() or None
         source = item.get("source_text")
-        matches = matcher.match(name, cas)
-        addressed.update(r.rule_id for r in matches)
         base = {"extracted_name": name, "cas": cas, "raw_value": item.get("concentration_raw"),
                 "source_text": source}
 
-        if not is_traceable(source, document_text):
-            # The model may have invented this. Nothing about it is trusted: no pass, no limit check.
-            for rule in matches or [None]:
-                label = rule.substance if rule else name
-                findings.append(Finding(
-                    UNTRACEABLE_EXTRACTION, SEVERITY[UNTRACEABLE_EXTRACTION], label,
-                    f"{label}: the extracted source text was not found in the document, so this entry "
-                    f"cannot be traced to the supplier's words. A person must check the original.",
-                    rule=rule, **base))
-            continue
+        # Each reading is (label or None, rules). Normally one reading; two on a conflict.
+        by_name, by_cas = matcher.match_name(name), matcher.match_cas(cas)
+        if by_name and by_cas and set(by_name) != set(by_cas):
+            readings = [(NAME_READING, by_name), (CAS_READING, [r for r in by_cas if r not in by_name])]
+            name_subs = ", ".join(r.substance for r in by_name)
+            cas_subs = ", ".join(r.substance for r in by_cas)
+            findings.append(Finding(
+                IDENTITY_CONFLICT, SEVERITY[IDENTITY_CONFLICT], f"{name_subs} / {cas_subs}",
+                f"\"{name}\" names {name_subs}, but CAS {cas} belongs to {cas_subs}. The entry is judged "
+                f"under both readings and rated by the worse one. A person must confirm which is meant.",
+                **base))
+        else:
+            readings = [(None, by_cas or by_name)]
 
-        for rule in matches:
-            if not cas:
-                findings.append(Finding(MISSING_CAS, SEVERITY[MISSING_CAS], rule.substance,
-                                        f"{rule.substance}: no CAS number given.", rule=rule, **base))
-            findings.extend(_concentration_findings(item, rule, {**base, "rule": rule}))
+        for reading, matches in readings:
+            addressed.update(r.rule_id for r in matches)
+            tag = {"reading": reading}
+            prefix = {NAME_READING: "Reading by name: ", CAS_READING: "Reading by CAS: ", None: ""}[reading]
+
+            if not is_traceable(source, document_text):
+                # The model may have invented this. Nothing about it is trusted: no pass, no limit check.
+                for rule in matches or [None]:
+                    label = rule.substance if rule else name
+                    findings.append(Finding(
+                        UNTRACEABLE_EXTRACTION, SEVERITY[UNTRACEABLE_EXTRACTION], label,
+                        f"{prefix}{label}: the extracted source text was not found in the document, so this "
+                        f"entry cannot be traced to the supplier's words. A person must check the original.",
+                        rule=rule, **base, **tag))
+                continue
+
+            for rule in matches:
+                if not cas:
+                    findings.append(Finding(MISSING_CAS, SEVERITY[MISSING_CAS], rule.substance,
+                                            f"{rule.substance}: no CAS number given.", rule=rule, **base))
+                for f in _concentration_findings(item, rule, {**base, "rule": rule}):
+                    findings.append(replace(f, message=prefix + f.message, **tag))
 
     for rule in restrictions:
         if rule.rule_id not in addressed:
             findings.append(Finding(NOT_DECLARED, SEVERITY[NOT_DECLARED], rule.substance,
                                     f"{rule.substance}: not addressed in the declaration. Please confirm.",
                                     rule=rule))
+    if restrictions and not addressed:
+        findings.append(Finding(NO_SUBSTANCES_ADDRESSED, SEVERITY[NO_SUBSTANCES_ADDRESSED], "(all)",
+                                "The declaration does not address any of the restricted substances, so "
+                                "nothing in it can be checked. A person must review it."))
 
     findings.sort(key=lambda f: _SEVERITY_ORDER[f.severity])
     rating, needs_review, watch = rate(findings)

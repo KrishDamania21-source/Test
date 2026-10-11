@@ -4,7 +4,9 @@ This file lets a new session continue the RADAR project exactly where the
 last one stopped. Read it in full before changing anything.
 
 **Branch:** `claude/radar-compliance-agent-pvwlmz` (repo `KrishDamania21-source/Test`, public)
-**Status:** Steps 1 to 4 done. Step 5 is next. 151 tests pass, with network blocked.
+**Status:** Steps 1 to 4 done, plus NO_SUBSTANCES_ADDRESSED and IDENTITY_CONFLICT (start of Step 5).
+The Step 5 agent outputs are next. 164 tests pass, with network blocked. First live extraction run
+still pending: see section 5, item 4.
 **Working style:** after each step, stop, summarize, and wait for the owner (Krish) to say "next".
 
 ---
@@ -166,7 +168,9 @@ substance names exactly as they appear in the active rule pack.
 | MISSING_CONCENTRATION | Medium | no value at all |
 | UNVERIFIABLE | Medium | vague text, number with no unit, or a bound that can't be compared |
 | EXEMPTION_CLAIMED | Medium | any exemption claim, checked before the value; shows value vs base limit |
+| NO_SUBSTANCES_ADDRESSED | Medium | the declaration addresses none of the restricted substances |
 | NEAR_LIMIT | Low + watch | at or above 80% of the limit |
+| IDENTITY_CONFLICT | Info (pending Krish) | name and CAS point to different restricted substances; entry judged under both readings |
 | NOT_DECLARED | Info | restricted substance not mentioned at all; never changes the rating |
 
 Rating: any OVER_LIMIT = High; else any Medium finding = Medium / Needs review; else NEAR_LIMIT
@@ -223,18 +227,24 @@ breaking two rules and confirming failures.
    a human. (Built in Step 4, with a test where a fake extraction invents a substance.)
 9. **`verified_by` stays pending.** Krish will verify the EU RoHS pack (and synonyms) against the
    official text himself.
-10. **NO_SUBSTANCES_ADDRESSED** and **IDENTITY_CONFLICT**: decided, see section 5 for the exact
-    behavior. Not built yet.
+10. **NO_SUBSTANCES_ADDRESSED** and **IDENTITY_CONFLICT**: decided and built, see section 5.
 11. Engine choices accepted by proceeding: `<X` is judged on its upper bound (UNVERIFIABLE if X is
     above the limit); `>X` is OVER_LIMIT if X is at or above the limit, else UNVERIFIABLE; an
     untraceable entry counts as addressing its substance (no duplicate NOT_DECLARED).
 
 ---
 
-## 5. Open items: decided, not built yet
+## 5. Open items
 
-Build these at the start of Step 5 (before the agent outputs), with offline tests. Existing
-answer key ratings stay unchanged: no current sample triggers either rule.
+Items 1 and 2 are built (`radar/engine.py`, tests in `tests/test_engine.py`). Existing answer key
+ratings are unchanged: no current sample triggers either rule.
+
+Implementation notes: `SubstanceMatcher` now has `match_cas` and `match_name`; `match` still
+prefers CAS. A conflict is only detectable when both the name and the CAS match rule rows: a name
+that matches no rule (for example "Copper" with lead's CAS) is judged by the CAS, as before.
+Findings under a conflict carry `reading` ("name" or "cas") and a "Reading by name:" or
+"Reading by CAS:" message prefix. Rating by the worse reading falls out of the normal rating,
+since both readings' findings are kept. An empty extraction is now Medium (it was Low).
 
 1. **NO_SUBSTANCES_ADDRESSED** (decided by Krish). If a declaration addresses none of the active
    restricted substances, raise this finding and rate the declaration **Medium / Needs review**.
@@ -252,10 +262,20 @@ answer key ratings stay unchanged: no current sample triggers either rule.
 
    Still to confirm with Krish: if both readings are clean, does the conflict alone force
    Medium / Needs review, or does the entry stay Low as "rate by the worse reading" implies?
-   Until he answers, do not force Medium.
+   Until he answers, do not force Medium. (Built that way: IDENTITY_CONFLICT is Info and not in
+   `NEEDS_REVIEW_TYPES`; changing his answer is a one-line edit plus the test
+   `test_conflict_with_both_readings_clean_is_not_forced_to_medium`.)
 3. **`verified_by` pending** on `rules/packs/eu_rohs/20261010T000000Z.csv` and
    `rules/synonyms/20261010T000000Z.json` ("Drafted by Claude Code; pending human
    verification"). Do not change it; Krish signs off himself.
+4. **Live API run blocked.** `ANTHROPIC_API_KEY` is not set as an environment variable in the
+   cloud session. The environment's network secret is registered for the host
+   `api.anthrophic.com` (misspelled), not `api.anthropic.com`, so the proxy never injects it for
+   the real API (which also bypasses the proxy). The client was deliberately NOT pointed at the
+   misspelled host, since that would send the key to a domain that is not Anthropic's. Fix: in the
+   environment settings, correct the network secret's host to `api.anthropic.com` (or add
+   `ANTHROPIC_API_KEY` as an environment variable), start a new session, then run
+   `python scripts/extract_samples.py`.
 
 ---
 

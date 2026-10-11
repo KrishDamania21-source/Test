@@ -461,9 +461,13 @@ class SubstanceMatcher:
                     bucket.append(rule)
 
     def match(self, name: str | None, cas: str | None) -> list[Rule]:
+        return self.match_cas(cas) or self.match_name(name)
+
+    def match_cas(self, cas: str | None) -> list[Rule]:
         norm = normalize_cas(cas)
-        if norm and norm in self._by_cas:
-            return list(self._by_cas[norm])
+        return list(self._by_cas.get(norm, [])) if norm else []
+
+    def match_name(self, name: str | None) -> list[Rule]:
         if not name:
             return []
         candidates = [name, re.sub(r"\(.*?\)", " ", name), *re.findall(r"\((.*?)\)", name)]
