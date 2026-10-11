@@ -249,6 +249,25 @@
       "expected_risk": "Medium",
       "watch_flag": false,
       "pack_id": "eu_rohs"
+    },
+    "08_pellham_blank_conc.xlsx": {
+      "supplier": "Pellham Fasteners",
+      "component": "PF-16 zinc-plated steel screw, M4",
+      "characteristic": "Excel declaration: two substances listed with CAS numbers but blank concentration cells",
+      "substance_count": 10,
+      "expected_findings": [
+        {
+          "type": "MISSING_CONCENTRATION",
+          "substance": "Cadmium"
+        },
+        {
+          "type": "MISSING_CONCENTRATION",
+          "substance": "Hexavalent chromium"
+        }
+      ],
+      "expected_risk": "Medium",
+      "watch_flag": false,
+      "pack_id": "eu_rohs"
     }
   }
 }

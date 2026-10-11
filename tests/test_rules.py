@@ -13,7 +13,8 @@ from radar.rules import (
     cas_checksum_ok,
     load_active_packs,
     load_active_rules,
-    load_synonyms,
+    load_active_synonyms,
+    parse_synonyms_text,
     parse_pack_text,
 )
 
@@ -145,7 +146,8 @@ def test_json_unknown_field_and_unsupported_type_rejected():
 
 def test_active_pointer_to_missing_version_fails(tmp_path):
     shutil.copytree(RULES_DIR, tmp_path / "rules")
-    (tmp_path / "rules" / "active.json").write_text('{"eu_rohs": "20990101T000000Z"}')
+    (tmp_path / "rules" / "active.json").write_text(
+        '{"packs": {"eu_rohs": "20990101T000000Z"}, "synonyms": "20261010T000000Z"}')
     with pytest.raises(RulePackError, match="does not exist"):
         load_active_packs(tmp_path / "rules")
 
@@ -166,7 +168,7 @@ def test_every_active_cas_number_passes_checksum():
 
 @pytest.fixture(scope="module")
 def matcher():
-    return SubstanceMatcher(load_active_rules(), load_synonyms())
+    return SubstanceMatcher(load_active_rules(), load_active_synonyms())
 
 
 @pytest.mark.parametrize("name, cas, expected", [
@@ -190,3 +192,44 @@ def test_matcher_hits(matcher, name, cas, expected):
 def test_matcher_misses_unrestricted(matcher):
     assert matcher.match("Copper", "7440-50-8") == []
     assert matcher.match(None, None) == []
+
+
+# ---- synonyms: versioned and validated like rule packs
+
+SYN_OK = {"last_verified": "2026-01-01", "verified_by": "Tester", "synonyms": {"Lead": ["Pb"], "Mercury": ["Hg"]}}
+
+
+def test_active_synonyms_cover_every_eu_rohs_substance():
+    syn = load_active_synonyms()
+    assert syn.version_id
+    for rule in load_active_rules():
+        assert syn.aliases_for(rule.substance), rule.substance
+
+
+def test_valid_synonyms_parse():
+    syn = parse_synonyms_text(json.dumps(SYN_OK))
+    assert syn.aliases_for("lead") == ("Pb",)
+
+
+@pytest.mark.parametrize("data, message", [
+    ({**SYN_OK, "synonyms": {"Lead": ["Pb"], "Mercury": ["pb"]}}, "already used by 'Lead'"),
+    ({**SYN_OK, "synonyms": {"Lead": ["Pb"], "Mercury": ["Lead"]}}, "already used by 'Lead'"),
+    ({**SYN_OK, "synonyms": {"Lead": "Pb"}}, "list of strings"),
+    ({**SYN_OK, "synonyms": {"Lead": ["--"]}}, "empty after normalization"),
+    ({**SYN_OK, "synonyms": {}}, "non-empty"),
+    ({**SYN_OK, "last_verified": "yesterday"}, "ISO date"),
+    ({**SYN_OK, "verified_by": " "}, "verified_by is required"),
+    ({**SYN_OK, "limits": {}}, "unknown field"),
+    ({k: v for k, v in SYN_OK.items() if k != "verified_by"}, "missing field"),
+])
+def test_bad_synonyms_rejected(data, message):
+    with pytest.raises(RulePackError, match=message):
+        parse_synonyms_text(json.dumps(data))
+
+
+def test_active_pointer_to_missing_synonyms_fails(tmp_path):
+    shutil.copytree(RULES_DIR, tmp_path / "rules")
+    (tmp_path / "rules" / "active.json").write_text(
+        '{"packs": {"eu_rohs": "20261010T000000Z"}, "synonyms": "20990101T000000Z"}')
+    with pytest.raises(RulePackError, match="does not exist"):
+        load_active_synonyms(tmp_path / "rules")

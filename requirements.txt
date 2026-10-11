@@ -1,6 +1,6 @@
 anthropic
 streamlit
-python-dotenv
+openpyxl
 jsonschema
 pypdf
 reportlab

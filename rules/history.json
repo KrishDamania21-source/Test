@@ -4,6 +4,14 @@
     "pack_id": "eu_rohs",
     "version_id": "20261010T000000Z",
     "action": "seeded",
-    "note": "Initial EU RoHS Annex II pack, drafted by Claude Code at the owner's request. Pending human verification against the official text."
+    "note": "Initial EU RoHS Annex II pack, drafted by Claude Code at the owner's request. Pending human verification against the official text.",
+    "kind": "pack"
+  },
+  {
+    "timestamp": "2026-10-10T00:00:00Z",
+    "kind": "synonyms",
+    "version_id": "20261010T000000Z",
+    "action": "seeded",
+    "note": "Initial synonyms list, drafted by Claude Code at the owner's request. Pending human verification."
   }
 ]

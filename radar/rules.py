@@ -3,9 +3,13 @@
 Rules live as data in rules/, never as Python constants:
 
     rules/packs/<pack_id>/<version_id>.csv   one full pack per version file
-    rules/active.json                        {pack_id: active version_id}
+    rules/synonyms/<version_id>.json         matching vocabulary, versioned the same way
+    rules/active.json                        {"packs": {pack_id: version_id}, "synonyms": version_id}
     rules/history.json                       approvals, rollbacks, seeding
-    rules/synonyms.json                      matching vocabulary (no limits)
+
+Synonyms hold no limits, but a wrong alias can cause a missed or wrong
+match, so they go through the same validation, sign-off and approval as
+rule packs.
 
 The engine, the Rules tab and every citation read rules only through
 load_active_rules(). Rules come only from files a human provides and
@@ -321,8 +325,15 @@ def list_versions(pack_id: str, rules_dir: Path = RULES_DIR) -> list[str]:
     return sorted(p.stem for p in folder.glob("*.csv") if _VERSION_ID_RE.match(p.stem))
 
 
+def read_active(rules_dir: Path = RULES_DIR) -> dict:
+    data = json.loads((rules_dir / "active.json").read_text(encoding="utf-8"))
+    if set(data) != {"packs", "synonyms"} or not isinstance(data["packs"], dict):
+        raise RulePackError(['active.json: must be {"packs": {...}, "synonyms": "<version_id>"}'])
+    return data
+
+
 def active_versions(rules_dir: Path = RULES_DIR) -> dict[str, str]:
-    return json.loads((rules_dir / "active.json").read_text(encoding="utf-8"))
+    return read_active(rules_dir)["packs"]
 
 
 def load_active_packs(rules_dir: Path = RULES_DIR) -> list[RulePack]:
@@ -336,9 +347,96 @@ def load_active_rules(rules_dir: Path = RULES_DIR) -> list[Rule]:
 
 # ---------------------------------------------------------------- matching
 
-def load_synonyms(rules_dir: Path = RULES_DIR) -> dict[str, list[str]]:
-    data = json.loads((rules_dir / "synonyms.json").read_text(encoding="utf-8"))
-    return data["synonyms"]
+@dataclass(frozen=True)
+class SynonymSet:
+    version_id: str
+    last_verified: date
+    verified_by: str
+    synonyms: dict[str, tuple[str, ...]]  # substance name as in packs -> aliases
+
+    def aliases_for(self, substance: str) -> tuple[str, ...]:
+        key = normalize_name(substance)
+        for name, aliases in self.synonyms.items():
+            if normalize_name(name) == key:
+                return aliases
+        return ()
+
+
+SYNONYM_FIELDS = {"about", "last_verified", "verified_by", "synonyms"}
+
+
+def parse_synonyms_text(text: str, version_id: str = "") -> SynonymSet:
+    """Validate a synonyms file. All or nothing, like rule packs.
+
+    Rejects an alias that points at two different substances, because the
+    matcher could not tell which one a supplier meant.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RulePackError([f"file: invalid JSON ({e})"]) from e
+    if not isinstance(data, dict):
+        raise RulePackError(["file: synonyms must be a JSON object"])
+
+    errors: list[str] = []
+    if missing := sorted({"last_verified", "verified_by", "synonyms"} - set(data)):
+        errors.append(f"file: missing field(s): {', '.join(missing)}")
+    if extra := sorted(set(data) - SYNONYM_FIELDS):
+        errors.append(f"file: unknown field(s): {', '.join(extra)}")
+    if errors:
+        raise RulePackError(errors)
+
+    verified = _parse_date(str(data["last_verified"]), "last_verified", errors, "file")
+    if not str(data["verified_by"]).strip():
+        errors.append("file: verified_by is required")
+    if not isinstance(data["synonyms"], dict) or not data["synonyms"]:
+        raise RulePackError(errors + ["file: synonyms must be a non-empty object"])
+
+    owner: dict[str, str] = {}  # normalized name or alias -> substance that claims it
+    clean: dict[str, tuple[str, ...]] = {}
+    for name in data["synonyms"]:
+        if normalize_name(name):
+            owner.setdefault(normalize_name(name), name)
+
+    for name, aliases in data["synonyms"].items():
+        where = f"substance '{name}'"
+        if not normalize_name(name):
+            errors.append(f"{where}: substance name is empty")
+            continue
+        if not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases):
+            errors.append(f"{where}: aliases must be a list of strings")
+            continue
+        for alias in aliases:
+            key = normalize_name(alias)
+            if not key:
+                errors.append(f"{where}: alias '{alias}' is empty after normalization")
+            elif owner.get(key, name) != name:
+                errors.append(f"{where}: alias '{alias}' is already used by '{owner[key]}'")
+            else:
+                owner[key] = name
+        clean[name] = tuple(aliases)
+
+    if errors:
+        raise RulePackError(errors)
+    return SynonymSet(version_id=version_id, last_verified=verified,
+                      verified_by=str(data["verified_by"]).strip(), synonyms=clean)
+
+
+def list_synonym_versions(rules_dir: Path = RULES_DIR) -> list[str]:
+    return sorted(p.stem for p in (rules_dir / "synonyms").glob("*.json") if _VERSION_ID_RE.match(p.stem))
+
+
+def load_synonym_version(version_id: str, rules_dir: Path = RULES_DIR) -> SynonymSet:
+    if not _VERSION_ID_RE.match(version_id):
+        raise RulePackError([f"active.json: synonyms version '{version_id}' is not YYYYMMDDTHHMMSSZ"])
+    path = rules_dir / "synonyms" / f"{version_id}.json"
+    if not path.exists():
+        raise RulePackError([f"active.json: {path.relative_to(rules_dir)} does not exist"])
+    return parse_synonyms_text(path.read_text(encoding="utf-8"), version_id=version_id)
+
+
+def load_active_synonyms(rules_dir: Path = RULES_DIR) -> SynonymSet:
+    return load_synonym_version(read_active(rules_dir)["synonyms"], rules_dir)
 
 
 class SubstanceMatcher:
@@ -349,15 +447,14 @@ class SubstanceMatcher:
     so 'Lead (Pb)', 'Pb' and 'lead' all match the Lead row.
     """
 
-    def __init__(self, rules: list[Rule], synonyms: dict[str, list[str]]):
+    def __init__(self, rules: list[Rule], synonyms: SynonymSet):
         self.rules = rules
         self._by_cas: dict[str, list[Rule]] = {}
         self._by_name: dict[str, list[Rule]] = {}
-        syn_index = {normalize_name(k): v for k, v in synonyms.items()}
         for rule in rules:
             for cas in rule.cas_numbers:
                 self._by_cas.setdefault(cas, []).append(rule)
-            names = {rule.substance, *syn_index.get(normalize_name(rule.substance), [])}
+            names = {rule.substance, *synonyms.aliases_for(rule.substance)}
             for name in names:
                 bucket = self._by_name.setdefault(normalize_name(name), [])
                 if rule not in bucket:
