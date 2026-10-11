@@ -223,7 +223,9 @@ breaking two rules and confirming failures.
    a human. (Built in Step 4, with a test where a fake extraction invents a substance.)
 9. **`verified_by` stays pending.** Krish will verify the EU RoHS pack (and synonyms) against the
    official text himself.
-10. Engine choices accepted by proceeding: `<X` is judged on its upper bound (UNVERIFIABLE if X is
+10. **NO_SUBSTANCES_ADDRESSED** and **IDENTITY_CONFLICT**: decided, see section 5 for the exact
+    behavior. Not built yet.
+11. Engine choices accepted by proceeding: `<X` is judged on its upper bound (UNVERIFIABLE if X is
     above the limit); `>X` is OVER_LIMIT if X is at or above the limit, else UNVERIFIABLE; an
     untraceable entry counts as addressing its substance (no duplicate NOT_DECLARED).
 
@@ -231,18 +233,26 @@ breaking two rules and confirming failures.
 
 ## 5. Open items: decided, not built yet
 
-Build these at the start of Step 5 (before the agent outputs), with tests, and add any affected
-expectations to the answer key only if a sample is designed for them.
+Build these at the start of Step 5 (before the agent outputs), with offline tests. Existing
+answer key ratings stay unchanged: no current sample triggers either rule.
 
-1. **NO_SUBSTANCES_ADDRESSED.** Today a declaration that addresses none of the active restricted
-   substances rates Low, which looks like a clean pass with nothing checked. New finding:
-   Medium / Needs review when the declaration addresses none of the active restricted substances.
-   (The proposal also mentioned a possible threshold such as "misses more than half"; confirm with
-   Krish whether he wants only the "none" case.)
-2. **IDENTITY_CONFLICT.** Today, if a row's name and CAS point to different restricted substances
-   (for example "Lead" with mercury's CAS), the CAS wins silently. New finding: Medium / Needs
-   review; do not judge that entry's value against either limit on its own. Confirm severity with
-   Krish when presenting.
+1. **NO_SUBSTANCES_ADDRESSED** (decided by Krish). If a declaration addresses none of the active
+   restricted substances, raise this finding and rate the declaration **Medium / Needs review**.
+   No partial threshold: a declaration that addresses at least one restricted substance is rated
+   by the normal rules. An untraceable entry still counts as addressing its substance (so it
+   gets UNTRACEABLE_EXTRACTION, which is already Medium).
+2. **IDENTITY_CONFLICT** (decided by Krish). When an entry's name and CAS point to different
+   substances (for example "Lead" with mercury's CAS 7439-97-6), **never pick one silently**:
+   * evaluate the entry under both readings (as the name's substance and as the CAS's
+     substance), each against its own rule row and limit;
+   * show both readings, with their findings, alongside an IDENTITY_CONFLICT finding that
+     explains the mismatch;
+   * rate by the **worse** of the two readings;
+   * both substances count as addressed for NOT_DECLARED.
+
+   Still to confirm with Krish: if both readings are clean, does the conflict alone force
+   Medium / Needs review, or does the entry stay Low as "rate by the worse reading" implies?
+   Until he answers, do not force Medium.
 3. **`verified_by` pending** on `rules/packs/eu_rohs/20261010T000000Z.csv` and
    `rules/synonyms/20261010T000000Z.json` ("Drafted by Claude Code; pending human
    verification"). Do not change it; Krish signs off himself.
