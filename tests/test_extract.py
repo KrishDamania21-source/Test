@@ -131,7 +131,10 @@ def test_changed_file_misses_cache(doc, cache_dir):
 
 
 def test_missing_api_key_gives_clear_error(doc, cache_dir, monkeypatch):
+    import radar.extract as _ext
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Point the key-file path at a non-existent location so the file fallback also fails.
+    monkeypatch.setattr(_ext, "_KEY_FILE", "/nonexistent/radar/api_key")
     with pytest.raises(ExtractionError, match="ANTHROPIC_API_KEY is not set"):
         extract(doc, cache_dir=cache_dir)
 
