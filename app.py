@@ -493,26 +493,38 @@ with tab_screening:
         existing_names = {r["filename"] for r in st.session_state.results}
         new_uploads = [f for f in uploaded if f.name not in existing_names]
         if new_uploads:
-            added: list[dict] = []
-            for uf in new_uploads:
-                data = uf.read()
-                if len(data) > MAX_UPLOAD_BYTES:
-                    st.error(f"{uf.name}: file exceeds 10 MB limit, skipped.")
-                    continue
-                with st.status(f"Processing {uf.name} ...",
-                               expanded=True) as status:
-                    r = _process(uf.name, data, status)
-                    if r["error"]:
-                        status.update(label=f"{uf.name} \u2014 error",
-                                      state="error", expanded=False)
-                    else:
-                        status.update(
-                            label=(f"{r.get('supplier') or uf.name} "
-                                   f"\u2014 {r['label']}"),
-                            state="complete", expanded=False,
-                        )
-                added.append(r)
-            st.session_state.results = st.session_state.results + added
+            col_btn, _ = st.columns([1, 3])
+            with col_btn:
+                screen_btn = st.button(
+                    f"Screen {len(new_uploads)} file{'s' if len(new_uploads) != 1 else ''}",
+                    type="primary",
+                    use_container_width=True,
+                )
+            if screen_btn:
+                added: list[dict] = []
+                for uf in new_uploads:
+                    data = uf.read()
+                    if len(data) > MAX_UPLOAD_BYTES:
+                        st.error(f"{uf.name}: file exceeds 10 MB limit, skipped.")
+                        continue
+                    with st.status(f"Processing {uf.name} ...",
+                                   expanded=True) as status:
+                        r = _process(uf.name, data, status)
+                        if r["error"]:
+                            status.update(label=f"{uf.name} \u2014 error",
+                                          state="error", expanded=True)
+                            st.error(r["error"])
+                        else:
+                            status.update(
+                                label=(f"{r.get('supplier') or uf.name} "
+                                       f"\u2014 {r['label']}"),
+                                state="complete", expanded=False,
+                            )
+                    added.append(r)
+                if added:
+                    st.session_state.results = st.session_state.results + added
+                    st.session_state.selected_id = added[0]["id"]
+                    st.rerun()
 
     results: list[dict] = st.session_state.results
 
