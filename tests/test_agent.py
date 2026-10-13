@@ -8,7 +8,9 @@ from radar.agent import (
     NO_EMAIL,
     AgentError,
     AgentOutput,
+    check_near_limit_email,
     check_numbers,
+    check_signature,
     check_substances,
     draft,
 )
@@ -17,6 +19,7 @@ from radar.engine import (
     LOW,
     MEDIUM,
     MISSING_CAS,
+    NEAR_LIMIT,
     NOT_DECLARED,
     OVER_LIMIT,
     Finding,
@@ -31,6 +34,7 @@ SYNONYMS = load_active_synonyms()
 # A restriction rule from the active pack (used to build test ScreeningResults)
 _LEAD_RULE = next(r for r in RULES if r.substance == "Lead")
 _MERCURY_RULE = next(r for r in RULES if r.substance == "Mercury")
+_CADMIUM_RULE = next(r for r in RULES if r.substance == "Cadmium")
 
 
 # --------------------------------------------------------------------------- helpers
@@ -42,6 +46,26 @@ def _over_limit_finding(substance="Lead", rule=None, value_pct=0.35) -> Finding:
         severity=HIGH,
         substance=substance,
         message=f"{substance}: {value_pct:.6g}% is above the {r.limit_pct:.6g}% limit.",
+        rule=r,
+        extracted_name=substance,
+        cas=r.cas_numbers[0] if r.cas_numbers else None,
+        value_pct=value_pct,
+        raw_value=str(value_pct),
+        source_text=f"| {substance} | {value_pct} | % |",
+    )
+
+
+def _near_limit_finding(substance="Cadmium", rule=None, value_pct=0.009) -> Finding:
+    r = rule or _CADMIUM_RULE
+    pct_of_limit = value_pct / r.limit_pct
+    return Finding(
+        type=NEAR_LIMIT,
+        severity=LOW,
+        substance=substance,
+        message=(
+            f"{substance}: {value_pct:.6g}% is within 80% of the {r.limit_pct:.6g}% limit "
+            f"({pct_of_limit:.0%} of the limit)."
+        ),
         rule=r,
         extracted_name=substance,
         cas=r.cas_numbers[0] if r.cas_numbers else None,
@@ -77,13 +101,15 @@ def _ok_response(substance="Lead", value="0.35", limit="0.1") -> str:
     return (
         f"EXPLANATION:\n"
         f"{substance} was found at {value}%, which exceeds the EU RoHS limit of {limit}%. "
-        f"This rates High and requires a corrected declaration.\n\n"
+        f"This rates High and requires action from the supplier.\n\n"
         f"EMAIL:\n"
+        f"DRAFT – for review before sending\n\n"
         f"Subject: EU RoHS compliance — {substance} over limit\n\n"
         f"Dear Kestrel Microparts,\n\n"
         f"Your declaration lists {substance} at {value}%, above the {limit}% limit. "
-        f"Please provide a corrected declaration with a measured concentration in %%.\n\n"
-        f"RADAR Compliance System (prototype — synthetic data only)"
+        f"Please provide supporting evidence or a corrected declaration.\n\n"
+        f"Please send your response at your earliest convenience.\n\n"
+        f"[Your name]\nSupplier Compliance"
     )
 
 
@@ -221,3 +247,62 @@ def test_draft_missing_explanation_section_raises(tmp_path):
     client = FakeClient(response(bad_format))
     with pytest.raises(AgentError, match="EXPLANATION"):
         draft(result, RULES, client=client, cache_dir=tmp_path)
+
+
+# --------------------------------------------------------------------------- new guard tests
+
+def test_near_limit_guard_catches_correct_word():
+    result = _screening([_near_limit_finding()], rating=LOW, watch=True)
+    errors = check_near_limit_email(
+        "Please provide a corrected declaration for cadmium.", result
+    )
+    assert any("correct" in e.lower() for e in errors)
+
+
+def test_near_limit_guard_catches_80_percent():
+    result = _screening([_near_limit_finding()], rating=LOW, watch=True)
+    errors = check_near_limit_email(
+        "The value is at 80% of the legal limit.", result
+    )
+    assert any("80%" in e for e in errors)
+
+
+def test_near_limit_guard_does_not_fire_for_over_limit():
+    """OVER_LIMIT findings should not trigger the NEAR_LIMIT guard."""
+    result = _screening([_over_limit_finding()])
+    errors = check_near_limit_email("Please provide a corrected declaration.", result)
+    assert errors == []
+
+
+def test_near_limit_guard_allows_clean_email():
+    result = _screening([_near_limit_finding()], rating=LOW, watch=True)
+    clean = (
+        "DRAFT – for review before sending\n\n"
+        "Subject: Cadmium near limit\n\n"
+        "Dear Supplier,\n\n"
+        "Please provide the test report and analytical method.\n\n"
+        "[Your name]\nSupplier Compliance"
+    )
+    assert check_near_limit_email(clean, result) == []
+
+
+def test_signature_guard_catches_radar_compliance_system():
+    email = (
+        "DRAFT – for review before sending\n\n"
+        "Subject: test\n\nDear supplier,\n\nPlease act.\n\n"
+        "RADAR Compliance System (prototype — synthetic data only)"
+    )
+    assert check_signature(email)
+
+
+def test_signature_guard_allows_human_name():
+    email = (
+        "DRAFT – for review before sending\n\n"
+        "Subject: test\n\nDear supplier,\n\nPlease act.\n\n"
+        "[Your name]\nSupplier Compliance"
+    )
+    assert check_signature(email) == []
+
+
+def test_no_email_passes_signature_guard():
+    assert check_signature(NO_EMAIL) == []

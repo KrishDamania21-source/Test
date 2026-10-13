@@ -33,7 +33,7 @@ from radar.engine import NOT_DECLARED, ScreeningResult
 from radar.extract import MODEL, make_client
 from radar.rules import Rule
 
-AGENT_OUTPUT_VERSION = "a1"
+AGENT_OUTPUT_VERSION = "a2"
 MAX_TOKENS = 2048
 
 NO_EMAIL = "No follow-up needed."
@@ -43,34 +43,77 @@ AGENT_CACHE_DIR = Path(os.environ.get(
     Path(__file__).resolve().parent.parent / ".cache" / "agent_outputs",
 ))
 
-SYSTEM_PROMPT = """You are a compliance notice writer for RADAR, a supplier screening prototype.
-Your only source of information is the structured findings summary provided below.
-Never introduce substance names, numeric values, legal citations, or conclusions \
-that are not present in the findings.
+SYSTEM_PROMPT = """You are a compliance notice writer. Your only source of information is the
+structured findings summary provided below. Never introduce substance names, numeric
+values, legal citations, or conclusions that are not present in the findings.
 
 Write two sections:
 
 EXPLANATION:
 Two to three sentences of plain-English risk summary for an internal compliance team.
 Name the specific substances and issues from the findings. Be direct about the risk
-rating. If rating is Low with no actionable findings, one sentence confirming the
-review is enough.
+rating.
+- For NEAR_LIMIT findings: describe the value as "at X% of the limit, above the 80%
+  watch threshold" (take the percentage from the finding message). State clearly that
+  the value is compliant.
+- If rating is Low with no actionable findings, one sentence confirming the review is
+  enough.
 
 EMAIL:
-A professional follow-up email to the supplier. Include:
-- Subject line as the first line, starting with "Subject: "
-- Opening addressed to the supplier by name
-- For each actionable finding: name the substance, state the issue, and state exactly
-  what evidence is required (corrected declaration with measured concentration in %,
-  CAS registry number, exemption basis document, etc.)
-- If any substances are listed as NOT_DECLARED, add a separate section headed
-  "Please confirm the following substances:" and ask for measured concentrations
-  or a written statement that the substance is absent
-- No legal threats or conclusions beyond what the findings state
-- Close and sign as: RADAR Compliance System (prototype — synthetic data only)
+Start the email body with this exact line on its own:
+DRAFT – for review before sending
+
+Then write the professional follow-up. Follow these rules for each finding type:
+
+OVER_LIMIT — offer three numbered paths:
+(a) If the declared value is incorrect, please provide a corrected declaration stating
+    the measured concentration in % and the CAS registry number.
+(b) If a regulatory exemption applies to this use, please provide the exemption
+    justification and confirmation that it is valid for this product category and is
+    still current.
+(c) If the value is correct and no exemption applies, please provide a compliant
+    replacement or a corrective action plan with an expected timeline.
+
+NEAR_LIMIT — the declared value is within the legal limit. Never use the word
+"correct" or any form of it. Never mention any 80% threshold. Ask for: the test
+report and analytical method used to determine the value, and whether batch or
+process variation could cause it to exceed the legal limit in future production.
+
+UNVERIFIABLE — match the response to the raw value shown in the finding:
+- "<LOD" or any value starting with "<" with no number following: ask for the limit
+  of detection and the analytical test method. Note that a stated LOD below the legal
+  limit is acceptable evidence.
+- "N/A": ask whether the substance is absent from the component or was simply not
+  tested.
+- "trace amounts" or any other qualitative description: ask for a measured
+  concentration in % and the analytical method used.
+
+EXEMPTION_CLAIMED — do not ask for a corrected declaration. Ask for the exemption
+justification document and confirmation that the exemption is valid for this product
+category and is still current.
+
+MISSING_CONCENTRATION — ask for a corrected declaration stating the measured
+concentration in %.
+
+MISSING_CAS — ask for a corrected declaration that includes the CAS registry number.
+
+NOT_DECLARED section — if any substances are NOT_DECLARED, add a section headed
+"Please confirm the following substances:" and use this one-line instruction before
+the list: "For each substance below, please provide either a measured concentration
+in % or a written statement that it is absent from the component."
+
+Word choice: use "corrected" only when a value is missing (MISSING_CONCENTRATION) or
+listed but invalid. Use "confirm" or "supporting evidence" in all other cases.
+
+End every email with one sentence summarising what to send back, then close as:
+
+[Your name]
+Supplier Compliance
+
+Never sign as RADAR, as a system, or with any tool or product name.
 
 If there are no actionable findings and no NOT_DECLARED substances, write only the
-word "No follow-up needed." as the entire EMAIL section.
+words "No follow-up needed." as the entire EMAIL section.
 
 Format your response exactly as:
 
@@ -168,8 +211,43 @@ def check_numbers(text: str, result: ScreeningResult, rules: list[Rule]) -> list
     ]
 
 
-def _guard(text: str, result: ScreeningResult, rules: list[Rule]) -> list[str]:
-    return check_substances(text, result, rules) + check_numbers(text, result, rules)
+def check_near_limit_email(email: str, result: ScreeningResult) -> list[str]:
+    """For NEAR_LIMIT findings: email must not contain 'correct' or any 80% reference."""
+    from radar.engine import NEAR_LIMIT
+    if not any(f.type == NEAR_LIMIT for f in result.findings):
+        return []
+    errors = []
+    if re.search(r"\bcorrect", email, re.IGNORECASE):
+        errors.append(
+            "NEAR_LIMIT email contains 'correct' — the value is compliant; "
+            "do not ask for a correction."
+        )
+    if re.search(r"80\s*%", email):
+        errors.append(
+            "NEAR_LIMIT email contains '80%' — the internal watch threshold "
+            "must not appear in the email."
+        )
+    return errors
+
+
+def check_signature(email: str) -> list[str]:
+    """Email must not be signed as RADAR or as a system."""
+    if re.search(r"RADAR\s+Compliance\s+System", email, re.IGNORECASE):
+        return [
+            "Email is signed as 'RADAR Compliance System' — sign as "
+            "'[Your name] / Supplier Compliance' instead."
+        ]
+    return []
+
+
+def _guard(explanation: str, email: str, result: ScreeningResult, rules: list[Rule]) -> list[str]:
+    combined = explanation + "\n" + email
+    return (
+        check_substances(combined, result, rules)
+        + check_numbers(combined, result, rules)
+        + check_near_limit_email(email, result)
+        + check_signature(email)
+    )
 
 
 # --------------------------------------------------------------------------- prompt building
@@ -302,7 +380,7 @@ def draft(
     except ValueError as exc:
         raise AgentError(f"Could not parse model response: {exc}") from exc
 
-    errors = _guard(explanation + "\n" + email, result, rules)
+    errors = _guard(explanation, email, result, rules)
     attempts = 1
 
     if errors:
@@ -325,7 +403,7 @@ def draft(
         except ValueError as exc:
             raise AgentError(f"Could not parse retry response: {exc}") from exc
 
-        errors = _guard(explanation + "\n" + email, result, rules)
+        errors = _guard(explanation, email, result, rules)
 
     error_str: str | None = None
     if errors:
