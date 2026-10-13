@@ -21,9 +21,10 @@ Step 5 (agent outputs) is next.
    edits rules or synonyms. New rule packs are staged, diffed and approved by a person.
 3. **Synthetic data only.** No real company names, suppliers or documents. Every sample says
    "Synthetic sample for the RADAR prototype. Fictional supplier."
-4. **The API key comes from the environment only** (`ANTHROPIC_API_KEY`). There is no `.env` file
-   in the cloud workspace. Never print, log or read its value. `.env` and `.env.*` are in
-   `.gitignore` and have never been committed.
+4. **The API key comes from the environment or a local file.** RADAR reads `ANTHROPIC_API_KEY`
+   from the environment first; if that is not set it reads `~/.config/radar/api_key` (outside
+   the repo, chmod 600). Never print, log or read its value into the conversation. `.env` and
+   `.env.*` are in `.gitignore` and have never been committed.
 5. **Cost rules.** Keep sample documents short. Cache every extraction to disk keyed by file
    hash, so re-running the UI never re-calls the API for an unchanged document.
 6. **Never change the answer key to match model output.** `samples/answer_key.json` is ground truth.
@@ -334,7 +335,8 @@ Two small, clearly labelled sample-subset packs (`is_subset = true`):
 * Clear the cache, run everything fresh, confirm all tests pass and the eval matches.
 * Give Krish a checklist for recording.
 * README section **"Run locally"** with exact Mac steps: clone, create a venv, install
-  requirements, set `ANTHROPIC_API_KEY` with `export` (not a file), run Streamlit. Krish records
+  requirements, set `ANTHROPIC_API_KEY` with `export` (preferred) **or** store it in
+  `~/.config/radar/api_key` (chmod 600, outside the repo), run Streamlit. Krish records
   the demo on his own machine.
 
 ---

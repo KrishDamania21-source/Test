@@ -164,13 +164,29 @@ def validate_extraction(text: str) -> tuple[dict | None, list[str]]:
 
 # ---------------------------------------------------------------- API call
 
+_KEY_FILE = os.path.expanduser("~/.config/radar/api_key")
+
+
 def make_client():
-    """Anthropic client. The SDK reads ANTHROPIC_API_KEY from the environment itself."""
+    """Anthropic client.
+
+    Reads the API key from ANTHROPIC_API_KEY if set, otherwise from
+    ~/.config/radar/api_key. The key is never printed or logged.
+    """
     import anthropic
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise ExtractionError("ANTHROPIC_API_KEY is not set in the environment.")
-    return anthropic.Anthropic()
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        try:
+            with open(_KEY_FILE) as fh:
+                key = fh.read().strip()
+        except OSError:
+            pass
+    if not key:
+        raise ExtractionError(
+            "ANTHROPIC_API_KEY is not set and ~/.config/radar/api_key is missing or empty."
+        )
+    return anthropic.Anthropic(api_key=key)
 
 
 def _user_prompt(doc: Document) -> str:
