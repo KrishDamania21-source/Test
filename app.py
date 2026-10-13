@@ -485,13 +485,13 @@ def _render_rules_tab() -> None:
 
 # ── header (always visible) ───────────────────────────────────────────────────
 st.markdown(
-    '<div style="background:linear-gradient(135deg,#1e3a5f 0%,#ffffff 100%);'
+    '<div style="background:linear-gradient(to right,#E8EEF6 0%,#ffffff 100%);'
     'border-radius:10px;padding:18px 24px 14px;margin-bottom:10px">'
-    '<h1 style="margin:0 0 4px;color:#1e3a5f;font-size:2em">RADAR</h1>'
-    '<p style="margin:0 0 2px;color:#374151;font-size:0.95em">'
+    '<h1 style="margin:0 0 4px;color:#1E2A3A;font-size:2em">RADAR</h1>'
+    '<p style="margin:0 0 2px;color:#1E2A3A;font-size:0.95em">'
     'Reads supplier declarations, checks them against EU RoHS limits, '
     'and drafts the follow-up.</p>'
-    '<p style="margin:0;color:#6b7280;font-size:0.82em">'
+    '<p style="margin:0;color:#5B6675;font-size:0.82em">'
     'All suppliers and documents are fictional. Synthetic data only.</p>'
     '</div>',
     unsafe_allow_html=True,
