@@ -15,7 +15,9 @@ from radar.engine import (
     IDENTITY_CONFLICT,
     LOW,
     MEDIUM,
+    NEAR_LIMIT,
     NOT_DECLARED,
+    OVER_LIMIT,
     UNTRACEABLE_EXTRACTION,
     ScreeningResult,
     screen,
@@ -140,23 +142,26 @@ def _badge(label: str, bg: str, text_color: str = "#fff",
 
 
 def _render_trace(trace: list[str]) -> None:
-    lines = []
+    pills = []
     for step_name in _TRACE_STEPS:
         done = any(ev.startswith(step_name) for ev in trace)
         detail = next((ev for ev in trace if ev.startswith(step_name)), step_name)
         if done:
-            lines.append(
-                f'<div style="font-size:0.82em;line-height:1.9">'
-                f'<span style="color:#16a34a;font-weight:700">&#10003;</span>'
-                f'&nbsp;{_html.escape(detail)}</div>'
+            pills.append(
+                f'<span style="display:inline-block;background:#dcfce7;color:#166534;'
+                f'border-radius:12px;padding:2px 9px;font-size:0.78em;font-weight:600;'
+                f'margin:2px 3px 2px 0">&#10003;&nbsp;{_html.escape(detail)}</span>'
             )
         else:
-            lines.append(
-                f'<div style="font-size:0.82em;line-height:1.9;color:#9ca3af">'
-                f'<span style="display:inline-block;width:0.9em">&mdash;</span>'
-                f'&nbsp;{_html.escape(step_name)}</div>'
+            pills.append(
+                f'<span style="display:inline-block;background:#f1f5f9;color:#94a3b8;'
+                f'border-radius:12px;padding:2px 9px;font-size:0.78em;'
+                f'margin:2px 3px 2px 0">&mdash;&nbsp;{_html.escape(step_name)}</span>'
             )
-    st.markdown("".join(lines), unsafe_allow_html=True)
+    st.markdown(
+        '<div style="margin:4px 0 8px">' + "".join(pills) + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_findings_table(findings: list) -> None:
@@ -180,14 +185,25 @@ def _render_findings_table(findings: list) -> None:
 
     rows = ""
     for f in non_nd:
-        highlight = f.type in _PROMINENT
-        row_bg = "#fefce8" if highlight else ""
+        if f.type == OVER_LIMIT:
+            row_bg = "#fef2f2"
+        elif f.type == NEAR_LIMIT:
+            row_bg = "#fffbeb"
+        elif f.type in _PROMINENT:
+            row_bg = "#fefce8"
+        else:
+            row_bg = ""
         sev_c  = _SEV_COLOR.get(f.severity, "#6b7280")
 
         type_html = (
             f'<span style="background:{sev_c};color:#fff;padding:1px 6px;'
             f'border-radius:3px;font-size:0.78em;font-weight:600;'
             f'white-space:nowrap">{_html.escape(f.type)}</span>'
+        )
+        sev_html = (
+            f'<span style="background:{sev_c}22;color:{sev_c};padding:2px 8px;'
+            f'border-radius:10px;font-size:0.78em;font-weight:600;'
+            f'white-space:nowrap">{_html.escape(f.severity)}</span>'
         )
         value_s = f"{f.value_pct:.4g}%" if f.value_pct is not None else "&mdash;"
         limit_s = f"{f.limit_pct:.4g}%" if f.limit_pct is not None else "&mdash;"
@@ -213,8 +229,7 @@ def _render_findings_table(findings: list) -> None:
             f'<tr style="background:{row_bg};vertical-align:top;'
             f'border-top:1px solid #e2e8f0">'
             f'<td style="padding:6px 10px">{type_html}</td>'
-            f'<td style="padding:6px 10px;white-space:nowrap;color:{sev_c};'
-            f'font-weight:600;font-size:0.85em">{_html.escape(f.severity)}</td>'
+            f'<td style="padding:6px 10px">{sev_html}</td>'
             f'<td style="padding:6px 10px;font-weight:500;min-width:140px">'
             f'{_html.escape(f.substance)}</td>'
             f'<td style="padding:6px 10px;white-space:nowrap">{value_s}</td>'
@@ -280,13 +295,20 @@ def _render_email(email_text: str, key_suffix: str) -> None:
     while body_lines and not body_lines[0].strip():
         body_lines.pop(0)
 
-    st.caption("DRAFT \u2013 for review before sending")
-    if subject:
-        st.markdown(f"**Subject:** {subject}")
-        st.markdown("")
-
+    subject_line = f"&nbsp;&nbsp;<strong>{_html.escape(subject)}</strong>" if subject else ""
     body_text = "\n".join(body_lines)
-    st.code(body_text, language=None, wrap_lines=True)
+    st.markdown(
+        f'<div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;'
+        f'box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:8px">'
+        f'<div style="background:#f1f5f9;padding:8px 14px;border-bottom:1px solid #e2e8f0;'
+        f'font-size:0.83em;color:#475569">'
+        f'<strong>DRAFT \u2013 for review before sending</strong>{subject_line}</div>'
+        f'<div style="padding:14px 16px;font-family:Georgia,serif;font-size:0.92em;'
+        f'color:#1e293b;line-height:1.7;white-space:pre-wrap">'
+        f'{_html.escape(body_text)}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     dl_col, _ = st.columns([1, 2])
     with dl_col:
@@ -302,15 +324,19 @@ def _render_email(email_text: str, key_suffix: str) -> None:
 
 def _render_detail(r: dict) -> None:
     supplier = r.get("supplier") or r["filename"]
-    st.markdown(f"### {supplier}")
+    badge_html = ""
+    if r.get("label"):
+        badge_html = "&nbsp;&nbsp;" + _badge(r["label"],
+                                              _RISK_COLOR.get(r["rating"], "#6b7280"),
+                                              size="0.8em")
+    st.markdown(
+        f'<h3 style="margin:0 0 2px;display:inline">'
+        f'{_html.escape(supplier)}</h3>{badge_html}',
+        unsafe_allow_html=True,
+    )
     if r.get("component"):
         st.caption(r["component"])
-    if r.get("label"):
-        st.markdown(
-            _badge(r["label"], _RISK_COLOR.get(r["rating"], "#6b7280")),
-            unsafe_allow_html=True,
-        )
-        st.markdown("")
+    st.markdown("")
 
     if r.get("error"):
         st.error(r["error"])
@@ -349,7 +375,14 @@ def _render_detail(r: dict) -> None:
     if r.get("agent_error"):
         st.error(r["agent_error"])
     elif r.get("explanation"):
-        st.info(r["explanation"])
+        st.markdown(
+            f'<div style="border-left:4px solid #1e3a5f;background:#ffffff;'
+            f'border-radius:0 6px 6px 0;padding:12px 16px;'
+            f'box-shadow:0 1px 3px rgba(0,0,0,0.06);font-size:0.93em;'
+            f'color:#1e293b;line-height:1.6">'
+            f'{_html.escape(r["explanation"])}</div>',
+            unsafe_allow_html=True,
+        )
 
     # Email
     st.markdown("---")
@@ -381,52 +414,59 @@ def _render_rules_tab() -> None:
 
         header = (
             '<table style="border-collapse:collapse;width:100%;font-size:0.87em">'
-            '<thead><tr style="background:#f1f5f9;text-align:left">'
-            '<th style="padding:6px 10px">Substance</th>'
-            '<th style="padding:6px 10px">CAS number(s)</th>'
-            '<th style="padding:6px 10px;white-space:nowrap">Limit</th>'
-            '<th style="padding:6px 10px">Obligation</th>'
-            '<th style="padding:6px 10px">Legal reference</th>'
-            '<th style="padding:6px 10px">Aliases</th>'
-            '<th style="padding:6px 10px">Citation</th>'
+            '<thead style="position:sticky;top:0;z-index:1">'
+            '<tr style="background:#1e3a5f;color:#fff;text-align:left">'
+            '<th style="padding:7px 10px">Substance</th>'
+            '<th style="padding:7px 10px">CAS number(s)</th>'
+            '<th style="padding:7px 10px;white-space:nowrap">Limit</th>'
+            '<th style="padding:7px 10px">Obligation</th>'
+            '<th style="padding:7px 10px">Legal reference</th>'
+            '<th style="padding:7px 10px">Aliases</th>'
+            '<th style="padding:7px 10px">Citation</th>'
             '</tr></thead><tbody>'
         )
         rows = ""
-        for rule in pack_rules:
+        for i, rule in enumerate(pack_rules):
             aliases = SYNONYMS.aliases_for(rule.substance)
             alias_str = _html.escape(", ".join(aliases[:8]))
             cas_str   = _html.escape("; ".join(rule.cas_numbers))
             limit_str = f"{rule.limit_pct:.4g}%" if rule.limit_pct is not None else ""
             ref       = _html.escape(rule.legal_reference or "")
             url       = rule.source_url or ""
+            src_note  = (f'<div style="font-size:0.75em;color:#9ca3af;margin-top:1px">'
+                         f'<a href="{_html.escape(url)}" target="_blank" '
+                         f'style="color:#9ca3af">{_html.escape(url[:60])}</a></div>'
+                         if url else "")
             ref_html  = (f'<a href="{_html.escape(url)}" target="_blank" '
                          f'style="color:#1e40af;text-decoration:none">{ref}</a>'
-                         if url else ref)
+                         if url else ref) + src_note
             rid       = _html.escape(rule.rule_id or "")
             subset_tag = (
                 ' <span style="background:#e0f2fe;color:#0369a1;padding:1px 5px;'
                 'border-radius:3px;font-size:0.75em">subset</span>'
                 if rule.is_subset else ""
             )
+            row_bg = "#f8fafc" if i % 2 == 0 else "#ffffff"
             rows += (
-                f'<tr style="border-top:1px solid #e2e8f0;vertical-align:top">'
+                f'<tr style="background:{row_bg};border-top:1px solid #e2e8f0;'
+                f'vertical-align:top">'
                 f'<td style="padding:6px 10px;font-weight:500">'
                 f'{_html.escape(rule.substance)}{subset_tag}</td>'
-                f'<td style="padding:6px 10px;font-size:0.85em;color:#475569">'
+                f'<td style="padding:6px 10px;font-size:0.82em;color:#6b7280">'
                 f'{cas_str}</td>'
                 f'<td style="padding:6px 10px;white-space:nowrap;font-weight:600">'
                 f'{_html.escape(limit_str)}</td>'
                 f'<td style="padding:6px 10px;white-space:nowrap">'
                 f'{_html.escape(rule.obligation_type)}</td>'
                 f'<td style="padding:6px 10px;font-size:0.85em">{ref_html}</td>'
-                f'<td style="padding:6px 10px;font-size:0.82em;color:#475569">'
+                f'<td style="padding:6px 10px;font-size:0.82em;color:#6b7280">'
                 f'{alias_str}</td>'
                 f'<td style="padding:6px 10px;font-size:0.75em;color:#9ca3af;'
                 f'word-break:break-all">{rid}</td>'
                 f'</tr>'
             )
         st.markdown(
-            f'<div style="overflow-x:auto;width:100%">'
+            f'<div style="overflow-x:auto;width:100%;max-height:480px;overflow-y:auto">'
             f'{header}{rows}</tbody></table></div>',
             unsafe_allow_html=True,
         )
@@ -444,22 +484,43 @@ def _render_rules_tab() -> None:
 
 
 # ── header (always visible) ───────────────────────────────────────────────────
-st.markdown("# RADAR")
-st.caption(
-    "Reads supplier declarations, checks them against EU RoHS limits, "
-    "and drafts the follow-up."
+st.markdown(
+    '<div style="background:linear-gradient(135deg,#1e3a5f 0%,#ffffff 100%);'
+    'border-radius:10px;padding:18px 24px 14px;margin-bottom:10px">'
+    '<h1 style="margin:0 0 4px;color:#1e3a5f;font-size:2em">RADAR</h1>'
+    '<p style="margin:0 0 2px;color:#374151;font-size:0.95em">'
+    'Reads supplier declarations, checks them against EU RoHS limits, '
+    'and drafts the follow-up.</p>'
+    '<p style="margin:0;color:#6b7280;font-size:0.82em">'
+    'All suppliers and documents are fictional. Synthetic data only.</p>'
+    '</div>',
+    unsafe_allow_html=True,
 )
-st.caption("All suppliers and documents are fictional. Synthetic data only.")
 
 st.markdown(
-    '<div style="background:#f1f5f9;border-radius:6px;padding:10px 16px;'
-    'margin:8px 0 4px">'
-    '<span style="font-size:0.88em;color:#475569">'
-    'Read &nbsp;&rsaquo;&nbsp; Extract &nbsp;&rsaquo;&nbsp; '
-    'Check against rules &nbsp;&rsaquo;&nbsp; Rate risk &nbsp;&rsaquo;&nbsp; '
-    'Draft follow-up</span><br>'
-    '<span style="font-size:0.82em;color:#94a3b8;font-style:italic">'
-    'The model reads, the code judges.</span></div>',
+    '<div style="background:#f0f4fa;border-radius:8px;padding:10px 16px;margin:0 0 6px">'
+    '<span style="display:inline-block;background:#1e3a5f;color:#fff;'
+    'padding:3px 10px;border-radius:12px;font-size:0.83em;font-weight:500;margin-right:4px">'
+    'Read</span>'
+    '<span style="color:#1e3a5f;font-weight:700;margin-right:4px">&rsaquo;</span>'
+    '<span style="display:inline-block;background:#1e3a5f;color:#fff;'
+    'padding:3px 10px;border-radius:12px;font-size:0.83em;font-weight:500;margin-right:4px">'
+    'Extract</span>'
+    '<span style="color:#1e3a5f;font-weight:700;margin-right:4px">&rsaquo;</span>'
+    '<span style="display:inline-block;background:#1e3a5f;color:#fff;'
+    'padding:3px 10px;border-radius:12px;font-size:0.83em;font-weight:500;margin-right:4px">'
+    'Check against rules</span>'
+    '<span style="color:#1e3a5f;font-weight:700;margin-right:4px">&rsaquo;</span>'
+    '<span style="display:inline-block;background:#1e3a5f;color:#fff;'
+    'padding:3px 10px;border-radius:12px;font-size:0.83em;font-weight:500;margin-right:4px">'
+    'Rate risk</span>'
+    '<span style="color:#1e3a5f;font-weight:700;margin-right:4px">&rsaquo;</span>'
+    '<span style="display:inline-block;background:#1e3a5f;color:#fff;'
+    'padding:3px 10px;border-radius:12px;font-size:0.83em;font-weight:500">'
+    'Draft follow-up</span>'
+    '<br><span style="font-size:0.82em;color:#6b7280;font-style:italic;margin-top:6px;'
+    'display:inline-block">The model reads, the code judges.</span>'
+    '</div>',
     unsafe_allow_html=True,
 )
 
@@ -571,14 +632,26 @@ with tab_screening:
                         and not r.get("watch"))
         n_err      = sum(1 for r in results if r["error"])
         total      = len(results)
-        parts = []
-        if n_high:  parts.append(f"{n_high} High")
-        if n_med:   parts.append(f"{n_med} Medium")
-        if n_low_w: parts.append(f"{n_low_w} Low (on watch)")
-        if n_low:   parts.append(f"{n_low} Low")
-        if n_err:   parts.append(f"{n_err} error")
-        st.caption(f"{total} declaration{'s' if total != 1 else ''}: "
-                   + ", ".join(parts))
+        def _tile(num: int, label: str, bg: str, txt: str = "#fff") -> str:
+            return (
+                f'<div style="background:{bg};color:{txt};border-radius:8px;'
+                f'padding:10px 16px;text-align:center;min-width:80px;'
+                f'display:inline-block;margin-right:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1)">'
+                f'<div style="font-size:1.6em;font-weight:700;line-height:1">{num}</div>'
+                f'<div style="font-size:0.75em;margin-top:4px;opacity:0.9">{label}</div>'
+                f'</div>'
+            )
+        tiles = _tile(total, "Total", "#374151")
+        if n_high:  tiles += _tile(n_high,  "High",        "#dc2626")
+        if n_med:   tiles += _tile(n_med,   "Medium",      "#d97706")
+        if n_low_w: tiles += _tile(n_low_w, "Low (watch)", "#4ade80", "#14532d")
+        if n_low:   tiles += _tile(n_low,   "Low",         "#16a34a")
+        if n_err:   tiles += _tile(n_err,   "Error",       "#6b7280")
+        st.markdown(
+            f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin:8px 0 12px">'
+            f'{tiles}</div>',
+            unsafe_allow_html=True,
+        )
 
         sorted_results = sorted(results, key=_sort_key)
 
@@ -588,20 +661,33 @@ with tab_screening:
         with col_port:
             st.markdown("**Portfolio**")
             for r in sorted_results:
-                with st.container(border=True):
-                    name = r.get("supplier") or r["filename"]
-                    st.markdown(f"**{name}**")
-                    if r.get("component"):
-                        st.caption(r["component"])
-                    if r.get("label"):
-                        st.markdown(
-                            _badge(r["label"],
-                                   _RISK_COLOR.get(r["rating"], "#6b7280")),
-                            unsafe_allow_html=True,
-                        )
-                    elif r["error"]:
-                        st.caption("Error processing file")
-                    st.caption(r["filename"])
+                is_sel = r["id"] == st.session_state.get("selected_id")
+                border_c = _RISK_COLOR.get(r.get("rating"), "#9ca3af")
+                card_bg  = "#f0f4ff" if is_sel else "#ffffff"
+                shadow   = ("0 0 0 2px #1e3a5f,0 2px 8px rgba(0,0,0,0.12)"
+                            if is_sel else "0 1px 4px rgba(0,0,0,0.08)")
+                name = r.get("supplier") or r["filename"]
+                badge_html = ""
+                if r.get("label"):
+                    badge_html = _badge(r["label"],
+                                        _RISK_COLOR.get(r["rating"], "#6b7280"))
+                elif r["error"]:
+                    badge_html = '<span style="color:#6b7280;font-size:0.82em">Error</span>'
+                with st.container():
+                    st.markdown(
+                        f'<div style="border-left:4px solid {border_c};'
+                        f'background:{card_bg};border-radius:6px;'
+                        f'padding:10px 12px 6px;box-shadow:{shadow};'
+                        f'margin-bottom:4px">'
+                        f'<strong style="font-size:0.95em">{_html.escape(name)}</strong>'
+                        + (f'<br><span style="font-size:0.80em;color:#6b7280">'
+                           f'{_html.escape(r["component"])}</span>'
+                           if r.get("component") else "")
+                        + f'<br>{badge_html}'
+                        f'<br><span style="font-size:0.75em;color:#9ca3af">'
+                        f'{_html.escape(r["filename"])}</span></div>',
+                        unsafe_allow_html=True,
+                    )
                     if st.button("View →", key=f"v_{r['id']}",
                                  use_container_width=True):
                         st.session_state.selected_id = r["id"]
