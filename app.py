@@ -126,6 +126,7 @@ def _process(filename: str, doc_bytes: bytes, status) -> dict:
         "explanation": agent_out.explanation,
         "email":       agent_out.email,
         "agent_error": agent_out.error,
+        "email_error": agent_out.email_error,
     })
     return result
 
@@ -230,6 +231,26 @@ def _render_findings_table(findings: list) -> None:
         unsafe_allow_html=True,
     )
 
+    # Evidence expanders — one per actionable finding with full source text
+    st.markdown("")
+    for f in non_nd:
+        label = f"{f.substance} \u2014 {f.type}"
+        with st.expander(f"Evidence: {label}"):
+            st.markdown(f"**{f.message}**")
+            if f.raw_value:
+                st.markdown(f"Raw value in declaration: `{f.raw_value}`")
+            if f.source_text:
+                st.markdown("Source text:")
+                st.code(f.source_text, language=None)
+            if f.rule:
+                ref = f.rule.legal_reference or ""
+                url = f.rule.source_url or ""
+                rid = f.rule_id or ""
+                if url and ref:
+                    st.markdown(f"Rule: [{ref}]({url})  \n`{rid}`")
+                elif ref:
+                    st.markdown(f"Rule: {ref}  \n`{rid}`")
+
 
 def _render_email(email_text: str, key_suffix: str) -> None:
     if email_text == NO_EMAIL:
@@ -267,14 +288,15 @@ def _render_email(email_text: str, key_suffix: str) -> None:
     body_text = "\n".join(body_lines)
     st.code(body_text, language=None, wrap_lines=True)
 
-    c1, c2, _ = st.columns([1, 1, 3])
-    with c1:
+    dl_col, _ = st.columns([1, 2])
+    with dl_col:
         st.download_button(
             "Download .txt",
             data=email_text,
             file_name=f"{key_suffix}_followup.txt",
             mime="text/plain",
             key=f"dl_{key_suffix}",
+            use_container_width=True,
         )
 
 
@@ -333,7 +355,10 @@ def _render_detail(r: dict) -> None:
     st.markdown("---")
     st.markdown("**Draft follow-up email**")
     safe_key = re.sub(r'[^\w]', '_', (r.get("supplier") or r["filename"])[:40])
-    _render_email(r.get("email", NO_EMAIL), safe_key)
+    if r.get("email_error"):
+        st.error(r["email_error"])
+    else:
+        _render_email(r.get("email", NO_EMAIL), safe_key)
 
 
 def _render_rules_tab() -> None:
@@ -564,25 +589,22 @@ with tab_screening:
             st.markdown("**Portfolio**")
             for r in sorted_results:
                 with st.container(border=True):
-                    c1, c2 = st.columns([3, 1])
-                    with c1:
-                        name = r.get("supplier") or r["filename"]
-                        st.markdown(f"**{name}**")
-                        if r.get("component"):
-                            st.caption(r["component"])
-                        if r.get("label"):
-                            st.markdown(
-                                _badge(r["label"],
-                                       _RISK_COLOR.get(r["rating"], "#6b7280")),
-                                unsafe_allow_html=True,
-                            )
-                        elif r["error"]:
-                            st.caption("Error processing file")
-                        st.caption(r["filename"])
-                    with c2:
-                        if st.button("View", key=f"v_{r['id']}",
-                                     use_container_width=True):
-                            st.session_state.selected_id = r["id"]
+                    name = r.get("supplier") or r["filename"]
+                    st.markdown(f"**{name}**")
+                    if r.get("component"):
+                        st.caption(r["component"])
+                    if r.get("label"):
+                        st.markdown(
+                            _badge(r["label"],
+                                   _RISK_COLOR.get(r["rating"], "#6b7280")),
+                            unsafe_allow_html=True,
+                        )
+                    elif r["error"]:
+                        st.caption("Error processing file")
+                    st.caption(r["filename"])
+                    if st.button("View →", key=f"v_{r['id']}",
+                                 use_container_width=True):
+                        st.session_state.selected_id = r["id"]
 
         # Detail column
         with col_detail:
@@ -595,7 +617,7 @@ with tab_screening:
                         (i for i, r in enumerate(sorted_results) if r["id"] == sel_id),
                         0,
                     )
-                    nav_c1, nav_c2, nav_c3, _ = st.columns([1, 1, 1, 3])
+                    nav_c1, nav_c2, nav_c3 = st.columns(3)
                     with nav_c1:
                         if st.button("← Back", use_container_width=True,
                                      help="Return to portfolio list"):

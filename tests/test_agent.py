@@ -22,6 +22,7 @@ from radar.engine import (
     NEAR_LIMIT,
     NOT_DECLARED,
     OVER_LIMIT,
+    UNVERIFIABLE,
     Finding,
     ScreeningResult,
 )
@@ -306,3 +307,77 @@ def test_signature_guard_allows_human_name():
 
 def test_no_email_passes_signature_guard():
     assert check_signature(NO_EMAIL) == []
+
+
+# --------------------------------------------------------------------------- NEAR_LIMIT guard with mixed findings
+
+def _unverifiable_finding(substance="Mercury", rule=None) -> Finding:
+    r = rule or _MERCURY_RULE
+    return Finding(
+        type=UNVERIFIABLE,
+        severity="Medium",
+        substance=substance,
+        message=f"{substance}: value '<LOD' cannot be verified against the limit.",
+        rule=r,
+        extracted_name=substance,
+        cas=r.cas_numbers[0] if r.cas_numbers else None,
+        raw_value="<LOD",
+        source_text=f"| {substance} | <LOD | |",
+    )
+
+
+def test_near_limit_guard_does_not_fire_with_over_limit_present():
+    """NEAR_LIMIT word-choice guard must not fire when OVER_LIMIT is also present.
+
+    Elstermann scenario: OVER_LIMIT + NEAR_LIMIT on same substance in different
+    materials. The email legitimately uses 'corrected' for the OVER_LIMIT finding.
+    """
+    findings = [
+        _over_limit_finding("Lead", value_pct=0.15),
+        _near_limit_finding("Lead", value_pct=0.009),
+    ]
+    result = _screening(findings, rating=HIGH)
+    email = (
+        "DRAFT \u2013 for review before sending\n\n"
+        "Subject: Lead issues\n\n"
+        "Dear Supplier,\n\n"
+        "Please provide a corrected declaration for lead in the contact spring.\n\n"
+        "[Your name]\nSupplier Compliance"
+    )
+    assert check_near_limit_email(email, result) == []
+
+
+def test_near_limit_guard_does_not_fire_with_unverifiable_present():
+    """NEAR_LIMIT guard must not fire when UNVERIFIABLE is also present."""
+    findings = [
+        _near_limit_finding("Cadmium"),
+        _unverifiable_finding("Mercury"),
+    ]
+    result = _screening(findings, rating=MEDIUM)
+    email = (
+        "DRAFT \u2013 for review before sending\n\n"
+        "Dear Supplier,\n\n"
+        "Please provide a corrected declaration for the cadmium value.\n\n"
+        "[Your name]\nSupplier Compliance"
+    )
+    assert check_near_limit_email(email, result) == []
+
+
+def test_near_limit_guard_still_fires_when_only_near_limit():
+    """Guard must still fire when NEAR_LIMIT is the sole actionable type."""
+    result = _screening([_near_limit_finding("Cadmium")], rating=LOW, watch=True)
+    email = "Please provide a corrected declaration for cadmium."
+    errors = check_near_limit_email(email, result)
+    assert any("correct" in e.lower() for e in errors)
+
+
+def test_near_limit_guard_ignores_not_declared():
+    """NOT_DECLARED is not actionable; NEAR_LIMIT-only guard fires even if NOT_DECLARED present."""
+    findings = [
+        _near_limit_finding("Cadmium"),
+        _not_declared_finding("Mercury"),
+    ]
+    result = _screening(findings, rating=LOW, watch=True)
+    email = "Please provide a corrected declaration for cadmium."
+    errors = check_near_limit_email(email, result)
+    assert any("correct" in e.lower() for e in errors)

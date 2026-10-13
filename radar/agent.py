@@ -33,7 +33,7 @@ from radar.engine import NOT_DECLARED, ScreeningResult
 from radar.extract import MODEL, make_client
 from radar.rules import Rule
 
-AGENT_OUTPUT_VERSION = "a2"
+AGENT_OUTPUT_VERSION = "a3"
 MAX_TOKENS = 2048
 
 NO_EMAIL = "No follow-up needed."
@@ -102,6 +102,10 @@ NOT_DECLARED section — if any substances are NOT_DECLARED, add a section heade
 the list: "For each substance below, please provide either a measured concentration
 in % or a written statement that it is absent from the component."
 
+Materials: when the same substance appears in multiple findings for different materials
+or components (as shown in the Source text for each finding), identify each occurrence
+by its specific material name so the supplier knows which one is being queried.
+
 Word choice: use "corrected" only when a value is missing (MISSING_CONCENTRATION) or
 listed but invalid. Use "confirm" or "supporting evidence" in all other cases.
 
@@ -139,7 +143,8 @@ class AgentOutput:
     email: str          # NO_EMAIL constant or the draft email text
     from_cache: bool
     attempts: int       # 0 = no API call (no findings), 1 or 2 with guard retry
-    error: str | None = None   # set when guard checks fail on both attempts
+    error: str | None = None        # explanation guard failure
+    email_error: str | None = None  # email-only guard failure
 
 
 # --------------------------------------------------------------------------- cache key
@@ -212,9 +217,20 @@ def check_numbers(text: str, result: ScreeningResult, rules: list[Rule]) -> list
 
 
 def check_near_limit_email(email: str, result: ScreeningResult) -> list[str]:
-    """For NEAR_LIMIT findings: email must not contain 'correct' or any 80% reference."""
-    from radar.engine import NEAR_LIMIT
-    if not any(f.type == NEAR_LIMIT for f in result.findings):
+    """For NEAR_LIMIT findings: email must not contain 'correct' or any 80% reference.
+
+    Only fires when NEAR_LIMIT is the sole actionable finding type. When OVER_LIMIT,
+    MISSING_*, UNVERIFIABLE, etc. are also present the email legitimately uses
+    'corrected' for those findings, so the restriction cannot apply.
+    """
+    from radar.engine import NEAR_LIMIT, NOT_DECLARED
+    actionable = [f for f in result.findings if f.type != NOT_DECLARED]
+    if not actionable:
+        return []
+    if not any(f.type == NEAR_LIMIT for f in actionable):
+        return []
+    # Only apply when every actionable finding is NEAR_LIMIT
+    if any(f.type != NEAR_LIMIT for f in actionable):
         return []
     errors = []
     if re.search(r"\bcorrect", email, re.IGNORECASE):
@@ -240,14 +256,26 @@ def check_signature(email: str) -> list[str]:
     return []
 
 
-def _guard(explanation: str, email: str, result: ScreeningResult, rules: list[Rule]) -> list[str]:
-    combined = explanation + "\n" + email
+def _guard_explanation(
+    explanation: str, result: ScreeningResult, rules: list[Rule]
+) -> list[str]:
+    return check_substances(explanation, result, rules) + check_numbers(explanation, result, rules)
+
+
+def _guard_email(
+    email: str, result: ScreeningResult, rules: list[Rule]
+) -> list[str]:
     return (
-        check_substances(combined, result, rules)
-        + check_numbers(combined, result, rules)
+        check_substances(email, result, rules)
+        + check_numbers(email, result, rules)
         + check_near_limit_email(email, result)
         + check_signature(email)
     )
+
+
+def _guard(explanation: str, email: str, result: ScreeningResult, rules: list[Rule]) -> list[str]:
+    """Return all guard errors (explanation + email combined)."""
+    return _guard_explanation(explanation, result, rules) + _guard_email(email, result, rules)
 
 
 # --------------------------------------------------------------------------- prompt building
@@ -343,6 +371,7 @@ def draft(
             from_cache=True,
             attempts=hit.get("attempts", 1),
             error=hit.get("error"),
+            email_error=hit.get("email_error"),
         )
 
     # No findings: return a canned result without an API call.
@@ -380,15 +409,17 @@ def draft(
     except ValueError as exc:
         raise AgentError(f"Could not parse model response: {exc}") from exc
 
-    errors = _guard(explanation, email, result, rules)
+    expl_errors = _guard_explanation(explanation, result, rules)
+    email_errors = _guard_email(email, result, rules)
     attempts = 1
 
-    if errors:
-        # Retry once, feeding the errors back.
+    if expl_errors or email_errors:
+        # Retry once, feeding all errors back.
         attempts = 2
+        all_errors = expl_errors + email_errors
         retry_msg = (
             "Your response failed the following checks:\n- "
-            + "\n- ".join(errors)
+            + "\n- ".join(all_errors)
             + "\n\nPlease regenerate both the EXPLANATION and EMAIL, "
             "correcting these issues. Use only substances and values "
             "present in the original findings."
@@ -403,19 +434,27 @@ def draft(
         except ValueError as exc:
             raise AgentError(f"Could not parse retry response: {exc}") from exc
 
-        errors = _guard(explanation, email, result, rules)
+        expl_errors = _guard_explanation(explanation, result, rules)
+        email_errors = _guard_email(email, result, rules)
 
-    error_str: str | None = None
-    if errors:
-        error_str = "Guard checks failed after retry: " + "; ".join(errors)
+    # Explanation and email fail independently — keep whichever passed.
+    explanation_error: str | None = None
+    email_error: str | None = None
+
+    if expl_errors:
+        explanation_error = "Guard checks failed: " + "; ".join(expl_errors)
         explanation = ""
+
+    if email_errors:
+        email_error = "Guard checks failed: " + "; ".join(email_errors)
         email = ""
 
     record = {
         "explanation": explanation,
         "email": email,
         "attempts": attempts,
-        "error": error_str,
+        "error": explanation_error,
+        "email_error": email_error,
     }
     cache.put(sha, AGENT_OUTPUT_VERSION, MODEL, record, cache_dir=effective_cache_dir)
 
@@ -427,5 +466,6 @@ def draft(
         email=email,
         from_cache=False,
         attempts=attempts,
-        error=error_str,
+        error=explanation_error,
+        email_error=email_error,
     )
