@@ -66,7 +66,7 @@ python scripts/eval_live.py           # compare engine output against the answer
 ## Run locally
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/KrishDamania21-source/radar.git
 cd radar
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
